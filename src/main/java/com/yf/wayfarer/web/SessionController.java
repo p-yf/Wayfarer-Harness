@@ -1,0 +1,118 @@
+package com.yf.wayfarer.web;
+
+import com.yf.wayfarer.session.MessageType;
+import com.yf.wayfarer.session.Session;
+import com.yf.wayfarer.session.SessionMessage;
+import com.yf.wayfarer.session.SessionMeta;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * 会话接口。
+ *
+ * @author yyf
+ * @description 提供会话的创建、列表、详情、消息查看、按轮次滑动取历史，以及 fork、clone、reset 操作
+ */
+@RestController
+@RequestMapping("/api/sessions")
+public class SessionController {
+
+    private final Session session;
+
+    public SessionController(Session session) {
+        this.session = session;
+    }
+
+    @PostMapping
+    public SessionMeta create(@RequestBody(required = false) Map<String, Object> body) {
+        String name = body == null ? "未命名会话" : String.valueOf(body.getOrDefault("name", "未命名会话"));
+        return session.meta(session.create(name));
+    }
+
+    @GetMapping
+    public List<SessionMeta> list() {
+        return session.list();
+    }
+
+    @GetMapping("/{sessionId}")
+    public SessionMeta meta(@PathVariable String sessionId) {
+        return session.meta(sessionId);
+    }
+
+    /**
+     * 向会话追加一条消息，未指定轮次 id 时自动生成并返回，便于与该轮运行对应。
+     */
+    @SuppressWarnings("unchecked")
+    @PostMapping("/{sessionId}/messages")
+    public Map<String, Object> append(@PathVariable String sessionId, @RequestBody Map<String, Object> body) {
+        String turnId = body.get("turnId") == null || String.valueOf(body.get("turnId")).isBlank()
+                ? UUID.randomUUID().toString()
+                : String.valueOf(body.get("turnId"));
+        MessageType type = MessageType.valueOf(
+                String.valueOf(body.getOrDefault("type", MessageType.USER.name())).toUpperCase());
+        Object rawContent = body.get("content");
+        Map<String, Object> content = rawContent instanceof Map<?, ?> map
+                ? (Map<String, Object>) map
+                : Map.of();
+        session.append(sessionId, type, turnId, content);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("sessionId", sessionId);
+        result.put("turnId", turnId);
+        return result;
+    }
+
+    /**
+     * 全量消息，用于调试与导出。
+     */
+    @GetMapping("/{sessionId}/messages")
+    public List<SessionMessage> messages(@PathVariable String sessionId) {
+        return session.messages(sessionId);
+    }
+
+    /**
+     * 按轮次滑动取历史：返回 turnId 之前最近 turns 轮的对话消息，turnId 为空时取最近 turns 轮。
+     */
+    @GetMapping("/{sessionId}/history")
+    public List<SessionMessage> history(@PathVariable String sessionId,
+                                        @RequestParam(required = false) String turnId,
+                                        @RequestParam(defaultValue = "3") int turns) {
+        return session.historyBefore(sessionId, turnId, turns);
+    }
+
+    @PostMapping("/{sessionId}/fork")
+    public Map<String, Object> fork(@PathVariable String sessionId, @RequestParam String turnId) {
+        return idResult(session.fork(sessionId, turnId));
+    }
+
+    @PostMapping("/{sessionId}/clone")
+    public Map<String, Object> clone(@PathVariable String sessionId) {
+        return idResult(session.clone(sessionId));
+    }
+
+    @DeleteMapping("/{sessionId}/turns/{turnId}")
+    public Map<String, Object> reset(@PathVariable String sessionId, @PathVariable String turnId) {
+        session.reset(sessionId, turnId);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("sessionId", sessionId);
+        result.put("resetFrom", turnId);
+        return result;
+    }
+
+    private static Map<String, Object> idResult(String sessionId) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("sessionId", sessionId);
+        return result;
+    }
+}

@@ -1,0 +1,13 @@
+server:
+  port: 8080
+
+wayfarer:
+  model:
+    api-key: ${DEEPSEEK_API_KEY:}
+    base-url: https://api.deepseek.com
+    name: deepseek-flash
+  session:
+    root: ./sessions
+    compact-threshold: 0
+  agent:
+    max-turns: 10

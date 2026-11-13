@@ -2,7 +2,7 @@ package com.yf.wayfarer.agent.toolchain;
 
 import com.yf.wayfarer.hitl.HitlService;
 import com.yf.wayfarer.loop.AgentContext;
-import com.yf.wayfarer.loop.AgentMsg;
+import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.FinishReason;
 import com.yf.wayfarer.model.ModelResponse;
@@ -145,7 +145,7 @@ class ToolCallHandlerTest {
         context.put(AgentContext.MESSAGES, new ArrayList<>(List.of(
                 new ChatMessage(ChatMessage.Role.USER, "执行操作"))));
         context.put(AgentContext.MODEL_RESPONSE, toolCallResponse(toolName));
-        context.put(AgentContext.AGENT_MSG_SINK, (Consumer<AgentMsg>) ignored -> {
+        context.put(AgentContext.AGENT_MSG_SINK, (Consumer<AgentMessage>) ignored -> {
         });
         return context;
     }

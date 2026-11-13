@@ -1,8 +1,8 @@
 package com.yf.wayfarer.agent.toolchain;
 
 import com.yf.wayfarer.loop.AgentContext;
-import com.yf.wayfarer.loop.AgentMsg;
 import com.yf.wayfarer.loop.ChainHandler;
+import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.ModelResponse;
 import com.yf.wayfarer.toolcall.ToolCall;
@@ -46,9 +46,9 @@ public class ToolCallHandler implements ChainHandler {
 
             Object result = toolCall.call(info, context);
             String content = result == null ? "" : String.valueOf(result);
-            Consumer<AgentMsg> sink = context.agentMsgSink();
+            Consumer<AgentMessage> sink = context.agentMsgSink();
             if (sink != null) {
-                sink.accept(AgentMsg.toolResult(info, content));
+                sink.accept(new AgentMessage.ToolResult(info.id(), content));
             }
             context.messages().add(new ChatMessage(ChatMessage.Role.TOOL, content, info.id()));
         });

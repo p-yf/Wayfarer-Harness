@@ -199,13 +199,22 @@ public class OpenAIChatModel implements ChatModel {
         }
         ChatCompletionChunk.Choice choice = chunk.choices().get(0);
         String content = choice.delta().content().orElse("");
+        String reasoning = reasoningOf(choice.delta());
         FinishReason finishReason = choice.finishReason()
                 .map(OpenAIChatModel::mapFinishReason)
                 .orElse(null);
-        if (content.isEmpty() && finishReason == null) {
+        if (content.isEmpty() && reasoning.isEmpty() && finishReason == null) {
             return Optional.empty();
         }
-        return Optional.of(new ChatChunk(content, finishReason));
+        return Optional.of(new ChatChunk(content, reasoning, finishReason, null));
+    }
+
+    /**
+     * 取 DeepSeek 思考模式下的 reasoning_content 增量，缺失时为空串。
+     */
+    private static String reasoningOf(ChatCompletionChunk.Choice.Delta delta) {
+        JsonValue value = delta._additionalProperties().get("reasoning_content");
+        return value == null ? "" : Optional.ofNullable(value.convert(String.class)).orElse("");
     }
 
     private static FinishReason mapFinishReason(ChatCompletionChunk.Choice.FinishReason reason) {
@@ -247,7 +256,7 @@ public class OpenAIChatModel implements ChatModel {
             }
             ChatCompletionChunk.Choice choice = chunk.choices().get(0);
             choice.delta().content().ifPresent(content::append);
-            reasoningContent(choice.delta()).ifPresent(reasoningContent::append);
+            reasoningContent.append(reasoningOf(choice.delta()));
             choice.delta().toolCalls().ifPresent(calls -> calls.forEach(call ->
                     toolCalls.computeIfAbsent((int) call.index(), index -> new ToolCallAccumulator()).merge(call)));
             choice.finishReason().ifPresent(reason -> finishReason = mapFinishReason(reason));
@@ -259,11 +268,6 @@ public class OpenAIChatModel implements ChatModel {
                     .toList();
             return new ModelResponse(id, model, created, content.toString(), reasoningContent.toString(),
                     finishReason, calls, usage);
-        }
-
-        private static Optional<String> reasoningContent(ChatCompletionChunk.Choice.Delta delta) {
-            JsonValue value = delta._additionalProperties().get("reasoning_content");
-            return value == null ? Optional.empty() : Optional.ofNullable(value.convert(String.class));
         }
 
         private static Usage toUsage(CompletionUsage value) {

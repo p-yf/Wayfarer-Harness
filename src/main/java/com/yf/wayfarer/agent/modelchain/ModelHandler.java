@@ -1,11 +1,12 @@
 package com.yf.wayfarer.agent.modelchain;
 
 import com.yf.wayfarer.loop.AgentContext;
-import com.yf.wayfarer.loop.AgentMsg;
 import com.yf.wayfarer.loop.ChainHandler;
+import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.ChatModel;
 import com.yf.wayfarer.model.ChatRequest;
+import com.yf.wayfarer.model.ModelResponse;
 import com.yf.wayfarer.toolcall.ToolDefinition;
 import reactor.core.publisher.Mono;
 
@@ -33,12 +34,23 @@ public class ModelHandler implements ChainHandler {
     public Mono<Void> run(AgentContext context, Mono<Void> next) {
         return model.stream(new ChatRequest(requestMessages(context), tools))
                 .doOnNext(chunk -> {
-                    Consumer<AgentMsg> sink = context.agentMsgSink();
-                    if (sink != null) {
-                        sink.accept(AgentMsg.chunk(chunk));
+                    ModelResponse response = chunk.response();
+                    if (response != null) {
+                        context.put(AgentContext.MODEL_RESPONSE, response);
                     }
-                    if (chunk.response() != null) {
-                        context.put(AgentContext.MODEL_RESPONSE, chunk.response());
+                    Consumer<AgentMessage> sink = context.agentMsgSink();
+                    if (sink == null) {
+                        return;
+                    }
+                    if (!chunk.reasoningContent().isEmpty()) {
+                        sink.accept(new AgentMessage.Reasoning(chunk.reasoningContent()));
+                    }
+                    if (!chunk.content().isEmpty()) {
+                        sink.accept(new AgentMessage.Text(chunk.content()));
+                    }
+                    if (response != null) {
+                        // 回复收尾：正文与思考已按增量送出，这里只给结束原因与用量
+                        sink.accept(new AgentMessage.End(response.finishReason(), response.usage()));
                     }
                 })
                 .then(next);

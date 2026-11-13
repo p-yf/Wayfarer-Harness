@@ -1,6 +1,6 @@
 package com.yf.wayfarer.loop;
 
-import com.yf.wayfarer.model.ChatChunk;
+import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.FinishReason;
 import com.yf.wayfarer.model.ModelResponse;
 import com.yf.wayfarer.toolcall.ToolCallInfo;
@@ -59,10 +59,10 @@ class LoopTest {
                         .doOnSuccess(ignored -> trace.add("model-after")),
                 (ctx, next) -> Mono.fromRunnable(() -> {
                     if (modelRuns.incrementAndGet() == 1) {
-                        ctx.agentMsgSink().accept(AgentMsg.chunk(new ChatChunk("查天气", null)));
+                        ctx.agentMsgSink().accept(new AgentMessage.Text("查天气"));
                         ctx.put(AgentContext.MODEL_RESPONSE, responseWithToolCall());
                     } else {
-                        ctx.agentMsgSink().accept(AgentMsg.chunk(new ChatChunk("北京晴", null)));
+                        ctx.agentMsgSink().accept(new AgentMessage.Text("北京晴"));
                         ctx.put(AgentContext.MODEL_RESPONSE, responseWithoutToolCall());
                     }
                 }));
@@ -73,14 +73,14 @@ class LoopTest {
                         .doOnSuccess(ignored -> trace.add("tool-after")),
                 (ctx, next) -> Mono.fromRunnable(() -> {
                     toolRuns.incrementAndGet();
-                    ctx.agentMsgSink().accept(AgentMsg.toolResult(call, "晴，25度"));
+                    ctx.agentMsgSink().accept(new AgentMessage.ToolResult("call_1", "晴，25度"));
                 }));
 
         StepVerifier.create(new Loop(modelChain, toolChain).run(context))
-                .expectNext(AgentMsg.chunk(new ChatChunk("查天气", null)))
-                .expectNext(AgentMsg.toolCall(call))
-                .expectNext(AgentMsg.toolResult(call, "晴，25度"))
-                .expectNext(AgentMsg.chunk(new ChatChunk("北京晴", null)))
+                .expectNext(new AgentMessage.Text("查天气"))
+                .expectNext(new AgentMessage.ToolCall(call))
+                .expectNext(new AgentMessage.ToolResult("call_1", "晴，25度"))
+                .expectNext(new AgentMessage.Text("北京晴"))
                 .verifyComplete();
 
         assertEquals(2, modelRuns.get());

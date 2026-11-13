@@ -6,7 +6,7 @@ package com.yf.wayfarer.session;
  * @author yyf
  * @description 对话消息（USER/ASSISTANT/TOOL）、自定义状态消息（CUSTOM）与压缩快照消息（COMPACT）
  */
-public enum MessageType {
+public enum JSONMsgType {
     USER,
     ASSISTANT,
     TOOL,

@@ -93,7 +93,7 @@ public final class JsonlSession implements Session {
         SessionMessage normalized = new SessionMessage(
                 String.valueOf(source.getOrDefault("messageId", UUID.randomUUID().toString())),
                 source.get("turnId") == null ? null : String.valueOf(source.get("turnId")),
-                MessageType.valueOf(String.valueOf(source.getOrDefault("type", MessageType.CUSTOM.name()))),
+                JSONMsgType.valueOf(String.valueOf(source.getOrDefault("type", JSONMsgType.CUSTOM.name()))),
                 cast(source.get("content")));
         write(file, normalized);
         compactIfNeeded(file);
@@ -153,12 +153,12 @@ public final class JsonlSession implements Session {
             if (lastTurnId == null) {
                 lastTurnId = message.turnId();
             }
-            if (message.type() == MessageType.COMPACT) {
+            if (message.type() == JSONMsgType.COMPACT) {
                 break;
             }
-            if (message.type() == MessageType.USER
-                    || message.type() == MessageType.ASSISTANT
-                    || message.type() == MessageType.TOOL) {
+            if (message.type() == JSONMsgType.USER
+                    || message.type() == JSONMsgType.ASSISTANT
+                    || message.type() == JSONMsgType.TOOL) {
                 count++;
             }
         }
@@ -172,7 +172,7 @@ public final class JsonlSession implements Session {
         }
         Map<String, Object> content = new LinkedHashMap<>();
         content.put("messages", snapshot);
-        write(file, new SessionMessage(UUID.randomUUID().toString(), lastTurnId, MessageType.COMPACT, content));
+        write(file, new SessionMessage(UUID.randomUUID().toString(), lastTurnId, JSONMsgType.COMPACT, content));
     }
 
     private String copy(String newName, List<String> lines) {

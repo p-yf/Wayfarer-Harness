@@ -3,7 +3,7 @@ package com.yf.wayfarer.web;
 import com.sun.net.httpserver.HttpServer;
 import com.yf.wayfarer.hitl.HitlService;
 import com.yf.wayfarer.loop.AgentContext;
-import com.yf.wayfarer.session.MessageType;
+import com.yf.wayfarer.session.JSONMsgType;
 import com.yf.wayfarer.session.Session;
 import com.yf.wayfarer.session.SessionMessage;
 import com.yf.wayfarer.session.SessionMeta;
@@ -127,8 +127,8 @@ class AgentWebTest {
     void 按轮次id滑动返回之前三轮历史() {
         String sessionId = session.create("滑动历史");
         for (int turn = 1; turn <= 5; turn++) {
-            session.append(sessionId, MessageType.USER, "turn-" + turn, userContent("问" + turn));
-            session.append(sessionId, MessageType.ASSISTANT, "turn-" + turn, assistantContent("答" + turn));
+            session.append(sessionId, JSONMsgType.USER, "turn-" + turn, userContent("问" + turn));
+            session.append(sessionId, JSONMsgType.ASSISTANT, "turn-" + turn, assistantContent("答" + turn));
         }
 
         SessionMessage[] page = client.get()
@@ -153,7 +153,7 @@ class AgentWebTest {
     void 不传轮次id时返回最近三轮() {
         String sessionId = session.create("最近历史");
         for (int turn = 1; turn <= 5; turn++) {
-            session.append(sessionId, MessageType.USER, "turn-" + turn, userContent("问" + turn));
+            session.append(sessionId, JSONMsgType.USER, "turn-" + turn, userContent("问" + turn));
         }
 
         SessionMessage[] page = client.get()
@@ -198,11 +198,12 @@ class AgentWebTest {
 
         assertTrue(events != null && !events.isEmpty());
         assertTrue(String.join("", events).contains("处理完成"), "流中应包含模型输出：" + events);
+        assertFalse(String.join("", events).contains("\"chunk\""), "不应再推送内部消息外壳：" + events);
 
         List<SessionMessage> stored = session.messages(sessionId);
         assertEquals(3, stored.size());
         assertEquals("turn-web", stored.get(0).turnId());
-        assertEquals(MessageType.ASSISTANT, stored.get(1).type());
+        assertEquals(JSONMsgType.ASSISTANT, stored.get(1).type());
         assertEquals("turn-web", stored.get(1).turnId(), "助手消息应沿用调用方指定的轮次 id");
         assertEquals("cursor-9", stored.get(2).content().get("store:cursor"));
     }
@@ -237,7 +238,7 @@ class AgentWebTest {
                 .expectStatus().isOk();
 
         String sessionId = session.create("提示词会话");
-        session.append(sessionId, MessageType.USER, "turn-1", userContent("你好"));
+        session.append(sessionId, JSONMsgType.USER, "turn-1", userContent("你好"));
 
         client.post().uri("/api/agent/stream")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -286,7 +287,7 @@ class AgentWebTest {
     @Test
     void 删除会话后列表中不再出现() {
         String sessionId = session.create("待删除会话");
-        session.append(sessionId, MessageType.USER, "turn-1", userContent("一"));
+        session.append(sessionId, JSONMsgType.USER, "turn-1", userContent("一"));
 
         client.delete().uri("/api/sessions/{id}", sessionId)
                 .exchange()

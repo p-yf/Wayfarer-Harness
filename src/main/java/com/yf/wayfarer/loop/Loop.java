@@ -1,5 +1,6 @@
 package com.yf.wayfarer.loop;
 
+import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ModelResponse;
 import com.yf.wayfarer.toolcall.ToolCallInfo;
 import reactor.core.Disposable;
@@ -38,9 +39,9 @@ public class Loop {
         this.maxTurns = maxTurns;
     }
 
-    public Flux<AgentMsg> run(AgentContext context) {
-        return Flux.<AgentMsg>create(sink -> {
-            Consumer<AgentMsg> agentMsgSink = sink::next;
+    public Flux<AgentMessage> run(AgentContext context) {
+        return Flux.<AgentMessage>create(sink -> {
+            Consumer<AgentMessage> agentMsgSink = sink::next;
             context.put(AgentContext.AGENT_MSG_SINK, agentMsgSink);
             // 当前步骤的订阅，取消时立即释放，避免模型连接与工具线程被继续占用
             AtomicReference<Disposable> step = new AtomicReference<>();
@@ -74,7 +75,7 @@ public class Loop {
                         if (sink.isCancelled()) {
                             break;
                         }
-                        sink.next(AgentMsg.toolCall(info));
+                        sink.next(new AgentMessage.ToolCall(info));
                     }
                     if (sink.isCancelled()) {
                         break;
@@ -96,7 +97,7 @@ public class Loop {
      *
      * @return 步骤正常结束且未被取消时返回 true
      */
-    private static boolean runStep(FluxSink<AgentMsg> sink, AtomicReference<Disposable> step, Mono<Void> chain) {
+    private static boolean runStep(FluxSink<AgentMessage> sink, AtomicReference<Disposable> step, Mono<Void> chain) {
         CountDownLatch finished = new CountDownLatch(1);
         AtomicReference<Throwable> failure = new AtomicReference<>();
         Disposable subscription = chain

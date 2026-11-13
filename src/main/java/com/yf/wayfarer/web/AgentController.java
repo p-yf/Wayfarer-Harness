@@ -1,8 +1,8 @@
 package com.yf.wayfarer.web;
 
-import com.yf.wayfarer.loop.AgentMsg;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -33,10 +33,11 @@ public class AgentController {
 
     /**
      * 以 server-sent events 流式返回 agent 消息。
-     * 请求体需包含 sessionId，可选 agentName 与任意 store 状态。
+     * 请求体需包含 sessionId，可选 agentName 与任意 store 状态；
+     * 事件类型为 delta、reasoning、tool_call、tool_result、message_end，流关闭即本轮运行结束。
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<AgentMsg> stream(@RequestBody Map<String, Object> payload) {
+    public Flux<ServerSentEvent<Object>> stream(@RequestBody Map<String, Object> payload) {
         Object rawSessionId = payload.get("sessionId");
         if (rawSessionId == null || String.valueOf(rawSessionId).isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少参数：sessionId");
@@ -45,7 +46,7 @@ public class AgentController {
         if (agentService.isRunning(sessionId)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "会话正在运行：" + sessionId);
         }
-        return agentService.stream(payload);
+        return agentService.stream(payload).concatMap(SseEvents::of);
     }
 
     /**

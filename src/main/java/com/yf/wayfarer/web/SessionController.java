@@ -1,6 +1,6 @@
 package com.yf.wayfarer.web;
 
-import com.yf.wayfarer.session.MessageType;
+import com.yf.wayfarer.session.JSONMsgType;
 import com.yf.wayfarer.session.Session;
 import com.yf.wayfarer.session.SessionMessage;
 import com.yf.wayfarer.session.SessionMeta;
@@ -62,8 +62,8 @@ public class SessionController {
         String turnId = body.get("turnId") == null || String.valueOf(body.get("turnId")).isBlank()
                 ? UUID.randomUUID().toString()
                 : String.valueOf(body.get("turnId"));
-        MessageType type = MessageType.valueOf(
-                String.valueOf(body.getOrDefault("type", MessageType.USER.name())).toUpperCase());
+        JSONMsgType type = JSONMsgType.valueOf(
+                String.valueOf(body.getOrDefault("type", JSONMsgType.USER.name())).toUpperCase());
         Object rawContent = body.get("content");
         Map<String, Object> content = rawContent instanceof Map<?, ?> map
                 ? (Map<String, Object>) map

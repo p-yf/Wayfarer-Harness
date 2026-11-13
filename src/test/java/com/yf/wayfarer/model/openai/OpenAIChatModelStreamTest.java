@@ -381,6 +381,37 @@ class OpenAIChatModelStreamTest {
         assertEquals("{\"city\":\"北京\"}", response.toolCalls().get(0).arguments());
     }
 
+    @Test
+    void 思考增量与文本增量分别给出() {
+        serveSse("""
+                data: {"id":"1","object":"chat.completion.chunk","created":1,"model":"deepseek-flash","choices":[{"index":0,"delta":{"reasoning_content":"先"},"finish_reason":null}]}
+
+                data: {"id":"1","object":"chat.completion.chunk","created":1,"model":"deepseek-flash","choices":[{"index":0,"delta":{"reasoning_content":"想一想"},"finish_reason":null}]}
+
+                data: {"id":"1","object":"chat.completion.chunk","created":1,"model":"deepseek-flash","choices":[{"index":0,"delta":{"content":"答案"},"finish_reason":null}]}
+
+                data: {"id":"1","object":"chat.completion.chunk","created":1,"model":"deepseek-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+                data: [DONE]
+
+                """);
+
+        List<ChatChunk> chunks = model.stream(new ChatRequest(List.of(
+                new ChatMessage(ChatMessage.Role.USER, "你好")))).collectList().block();
+
+        assertNotNull(chunks);
+        assertEquals("先", chunks.get(0).reasoningContent());
+        assertEquals("", chunks.get(0).content());
+        assertEquals("想一想", chunks.get(1).reasoningContent());
+        assertEquals("答案", chunks.get(2).content());
+        assertEquals("", chunks.get(3).reasoningContent());
+
+        ModelResponse response = chunks.get(chunks.size() - 1).response();
+        assertNotNull(response);
+        assertEquals("先想一想", response.reasoningContent());
+        assertEquals("答案", response.content());
+    }
+
     private void serveSse(String sse) {
         serve(exchange -> {
             byte[] body = sse.getBytes(StandardCharsets.UTF_8);

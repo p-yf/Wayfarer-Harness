@@ -3,12 +3,12 @@ package com.yf.wayfarer.agent;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.yf.wayfarer.loop.AgentContext;
-import com.yf.wayfarer.loop.AgentMsg;
+import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.ModelConfig;
 import com.yf.wayfarer.model.openai.OpenAIChatModel;
 import com.yf.wayfarer.session.JsonlSession;
-import com.yf.wayfarer.session.MessageType;
+import com.yf.wayfarer.session.JSONMsgType;
 import com.yf.wayfarer.session.Session;
 import com.yf.wayfarer.session.SessionMessage;
 import com.yf.wayfarer.session.UnloadedMessageStore;
@@ -90,13 +90,13 @@ class AgentSessionTest {
     @Test
     void 按会话id运行并持久化消息与状态() {
         String sessionId = session.create("会话一");
-        session.append(sessionId, MessageType.USER, "turn-user", userContent("查一下错误日志"));
+        session.append(sessionId, JSONMsgType.USER, "turn-user", userContent("查一下错误日志"));
 
         AgentContext context = new AgentContext();
         context.put(AgentContext.SESSION_ID, sessionId);
         context.put("store:cursor", "cursor-1");
 
-        List<AgentMsg> messages = agent().stream(context).collectList().block();
+        List<AgentMessage> messages = agent().stream(context).collectList().block();
         assertNotNull(messages);
         assertTrue(messages.size() >= 1);
         assertNotNull(context.turnId());
@@ -106,25 +106,25 @@ class AgentSessionTest {
 
         List<SessionMessage> stored = session.messages(sessionId);
         assertEquals(3, stored.size(), "应依次写入用户、助手、自定义状态三条消息");
-        assertEquals(MessageType.USER, stored.get(0).type());
-        assertEquals(MessageType.ASSISTANT, stored.get(1).type());
+        assertEquals(JSONMsgType.USER, stored.get(0).type());
+        assertEquals(JSONMsgType.ASSISTANT, stored.get(1).type());
         assertEquals("处理完成", stored.get(1).content().get("content"));
         assertEquals(context.turnId(), stored.get(1).turnId(), "助手消息应记录本轮轮次 id");
-        assertEquals(MessageType.CUSTOM, stored.get(2).type());
+        assertEquals(JSONMsgType.CUSTOM, stored.get(2).type());
         assertEquals("cursor-1", stored.get(2).content().get("store:cursor"));
     }
 
     @Test
     void 再次按会话id运行时可恢复历史与状态() {
         String sessionId = session.create("会话二");
-        session.append(sessionId, MessageType.USER, "turn-1", userContent("第一轮"));
+        session.append(sessionId, JSONMsgType.USER, "turn-1", userContent("第一轮"));
         AgentContext first = new AgentContext();
         first.put(AgentContext.SESSION_ID, sessionId);
         first.put("store:step", "1");
         agent().stream(first).collectList().block();
 
         // 新一轮：追加用户消息，再按同一会话 id 运行
-        session.append(sessionId, MessageType.USER, "turn-2", userContent("第二轮"));
+        session.append(sessionId, JSONMsgType.USER, "turn-2", userContent("第二轮"));
         AgentContext second = new AgentContext();
         second.put(AgentContext.SESSION_ID, sessionId);
         agent().stream(second).collectList().block();
@@ -143,7 +143,7 @@ class AgentSessionTest {
     @Test
     void 恢复会话后消息顺序为历史加本轮回复() {
         String sessionId = session.create("会话三");
-        session.append(sessionId, MessageType.USER, "turn-1", userContent("你好"));
+        session.append(sessionId, JSONMsgType.USER, "turn-1", userContent("你好"));
         AgentContext runContext = new AgentContext();
         runContext.put(AgentContext.SESSION_ID, sessionId);
         agent().stream(runContext).collectList().block();

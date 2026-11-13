@@ -2,6 +2,7 @@ package com.yf.wayfarer.loop;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.FinishReason;
 import com.yf.wayfarer.model.ModelConfig;
@@ -99,17 +100,18 @@ class AgentChainTest {
                 new ChatMessage(ChatMessage.Role.USER, "检查日志"))));
 
         StepVerifier.create(new Loop(modelChain, toolChain).run(context))
-                .expectNextMatches(msg -> msg.chunk() != null
-                        && msg.chunk().finishReason() == FinishReason.TOOL_CALLS)
-                .expectNextMatches(msg -> msg.chunk() != null && msg.chunk().response() != null)
-                .expectNextMatches(msg -> "call_1".equals(msg.toolCallInfo().id())
-                        && "inspect_logs".equals(msg.toolCallInfo().name()))
-                .expectNextMatches(msg -> "128条错误".equals(msg.toolResult()))
-                .expectNextMatches(msg -> "检查完成".equals(msg.chunk().content()))
-                .expectNextMatches(msg -> msg.chunk() != null
-                        && msg.chunk().finishReason() == FinishReason.STOP)
-                .expectNextMatches(msg -> msg.chunk().response() != null
-                        && "检查完成".equals(msg.chunk().response().content()))
+                .expectNextMatches(msg -> msg instanceof AgentMessage.End end
+                        && end.finishReason() == FinishReason.TOOL_CALLS)
+                .expectNextMatches(msg -> msg instanceof AgentMessage.ToolCall call
+                        && "call_1".equals(call.call().id())
+                        && "inspect_logs".equals(call.call().name()))
+                .expectNextMatches(msg -> msg instanceof AgentMessage.ToolResult result
+                        && "call_1".equals(result.toolCallId())
+                        && "128条错误".equals(result.content()))
+                .expectNextMatches(msg -> msg instanceof AgentMessage.Text text
+                        && "检查完成".equals(text.content()))
+                .expectNextMatches(msg -> msg instanceof AgentMessage.End end
+                        && end.finishReason() == FinishReason.STOP)
                 .verifyComplete();
 
         // 第二次请求应回传工具调用、结果与完整历史

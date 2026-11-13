@@ -3,7 +3,7 @@ package com.yf.wayfarer.web;
 import com.yf.wayfarer.agent.Agent;
 import com.yf.wayfarer.agent.toolchain.UnloadTools;
 import com.yf.wayfarer.loop.AgentContext;
-import com.yf.wayfarer.loop.AgentMsg;
+import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ModelConfig;
 import com.yf.wayfarer.model.openai.OpenAIChatModel;
 import com.yf.wayfarer.prompt.SystemPromptStore;
@@ -72,7 +72,7 @@ public class AgentService {
     /**
      * 按请求体中的 sessionId 流式运行，其余参数原样写入上下文。
      */
-    public Flux<AgentMsg> stream(Map<String, Object> payload) {
+    public Flux<AgentMessage> stream(Map<String, Object> payload) {
         String sessionId = text(payload.get("sessionId"));
         if (sessionId == null) {
             throw new IllegalArgumentException("缺少参数：sessionId");

@@ -40,11 +40,11 @@ class JsonlSessionTest {
         assertTrue(fileName.contains("排查错误"), "文件名应包含会话名称：" + fileName);
         assertTrue(fileName.endsWith(".jsonl"), "文件名应以 .jsonl 结尾：" + fileName);
 
-        session.append(id, MessageType.USER, "turn-1", userContent("查一下日志"));
+        session.append(id, JSONMsgType.USER, "turn-1", userContent("查一下日志"));
 
         // 文件实际写入了合法 json 行，messageId 自动生成
         SessionMessage stored = session.messages(id).get(0);
-        assertEquals(MessageType.USER, stored.type());
+        assertEquals(JSONMsgType.USER, stored.type());
         assertEquals("turn-1", stored.turnId());
         assertEquals("查一下日志", stored.content().get("content"));
         assertTrue(stored.messageId() != null && !stored.messageId().isBlank());
@@ -54,8 +54,8 @@ class JsonlSessionTest {
     void 按会话id恢复完整会话() {
         Session session = new JsonlSession(root);
         String id = session.create("恢复测试");
-        session.append(id, MessageType.USER, "turn-1", userContent("第一句"));
-        session.append(id, MessageType.ASSISTANT, "turn-1", assistantContent("第一答"));
+        session.append(id, JSONMsgType.USER, "turn-1", userContent("第一句"));
+        session.append(id, JSONMsgType.ASSISTANT, "turn-1", assistantContent("第一答"));
 
         SessionMeta meta = session.meta(id);
         assertEquals(id, meta.id());
@@ -83,7 +83,7 @@ class JsonlSessionTest {
     void 删除会话后无法再按id打开() {
         Session session = new JsonlSession(root);
         String id = session.create("待删除会话");
-        session.append(id, MessageType.USER, "turn-1", userContent("一"));
+        session.append(id, JSONMsgType.USER, "turn-1", userContent("一"));
 
         session.delete(id);
 
@@ -102,10 +102,10 @@ class JsonlSessionTest {
     void fork只克隆指定轮次之前的消息() {
         Session session = new JsonlSession(root);
         String id = session.create("原始会话");
-        session.append(id, MessageType.USER, "turn-1", userContent("一"));
-        session.append(id, MessageType.ASSISTANT, "turn-1", assistantContent("一答"));
-        session.append(id, MessageType.USER, "turn-2", userContent("二"));
-        session.append(id, MessageType.ASSISTANT, "turn-2", assistantContent("二答"));
+        session.append(id, JSONMsgType.USER, "turn-1", userContent("一"));
+        session.append(id, JSONMsgType.ASSISTANT, "turn-1", assistantContent("一答"));
+        session.append(id, JSONMsgType.USER, "turn-2", userContent("二"));
+        session.append(id, JSONMsgType.ASSISTANT, "turn-2", assistantContent("二答"));
 
         String forkedId = session.fork(id, "turn-2");
 
@@ -121,7 +121,7 @@ class JsonlSessionTest {
     void fork指定不存在的轮次时报错() {
         Session session = new JsonlSession(root);
         String id = session.create("原始会话");
-        session.append(id, MessageType.USER, "turn-1", userContent("一"));
+        session.append(id, JSONMsgType.USER, "turn-1", userContent("一"));
 
         assertThrows(IllegalArgumentException.class, () -> session.fork(id, "turn-9"));
     }
@@ -130,8 +130,8 @@ class JsonlSessionTest {
     void clone克隆当前完整会话() {
         Session session = new JsonlSession(root);
         String id = session.create("原始会话");
-        session.append(id, MessageType.USER, "turn-1", userContent("一"));
-        session.append(id, MessageType.ASSISTANT, "turn-1", assistantContent("一答"));
+        session.append(id, JSONMsgType.USER, "turn-1", userContent("一"));
+        session.append(id, JSONMsgType.ASSISTANT, "turn-1", assistantContent("一答"));
 
         String copiedId = session.clone(id);
 
@@ -144,16 +144,16 @@ class JsonlSessionTest {
     void 达到压缩阈值后写入压缩消息并能正确恢复() {
         Session session = new JsonlSession(root, 2);
         String id = session.create("压缩会话");
-        session.append(id, MessageType.USER, "turn-1", userContent("一"));
-        session.append(id, MessageType.ASSISTANT, "turn-1", assistantContent("一答"));
+        session.append(id, JSONMsgType.USER, "turn-1", userContent("一"));
+        session.append(id, JSONMsgType.ASSISTANT, "turn-1", assistantContent("一答"));
 
         List<SessionMessage> messages = session.messages(id);
         assertEquals(3, messages.size());
-        assertEquals(MessageType.COMPACT, messages.get(2).type());
+        assertEquals(JSONMsgType.COMPACT, messages.get(2).type());
         assertEquals(2, ((List<?>) messages.get(2).content().get("messages")).size());
 
         // 压缩后继续追加，恢复时应叠加在压缩基线之后
-        session.append(id, MessageType.USER, "turn-2", userContent("二"));
+        session.append(id, JSONMsgType.USER, "turn-2", userContent("二"));
 
         List<ChatMessage> history = session.history(id);
         assertEquals(3, history.size());
@@ -166,15 +166,15 @@ class JsonlSessionTest {
     void 恢复时回填最后一个自定义消息的状态() {
         Session session = new JsonlSession(root);
         String id = session.create("状态会话");
-        session.append(id, MessageType.USER, "turn-1", userContent("一"));
+        session.append(id, JSONMsgType.USER, "turn-1", userContent("一"));
 
         Map<String, Object> first = new LinkedHashMap<>();
         first.put("store:step", "1");
-        session.append(id, MessageType.CUSTOM, "turn-1", first);
+        session.append(id, JSONMsgType.CUSTOM, "turn-1", first);
 
         Map<String, Object> second = new LinkedHashMap<>();
         second.put("store:step", "2");
-        session.append(id, MessageType.CUSTOM, "turn-2", second);
+        session.append(id, JSONMsgType.CUSTOM, "turn-2", second);
 
         AgentContext context = new AgentContext();
         session.restore(id, context);
@@ -187,10 +187,10 @@ class JsonlSessionTest {
     void reset删除指定轮次及其之后的全部消息() {
         Session session = new JsonlSession(root);
         String id = session.create("重置会话");
-        session.append(id, MessageType.USER, "turn-1", userContent("一"));
-        session.append(id, MessageType.ASSISTANT, "turn-1", assistantContent("一答"));
-        session.append(id, MessageType.USER, "turn-2", userContent("二"));
-        session.append(id, MessageType.ASSISTANT, "turn-2", assistantContent("二答"));
+        session.append(id, JSONMsgType.USER, "turn-1", userContent("一"));
+        session.append(id, JSONMsgType.ASSISTANT, "turn-1", assistantContent("一答"));
+        session.append(id, JSONMsgType.USER, "turn-2", userContent("二"));
+        session.append(id, JSONMsgType.ASSISTANT, "turn-2", assistantContent("二答"));
 
         session.reset(id, "turn-2");
 
@@ -201,7 +201,7 @@ class JsonlSessionTest {
         assertEquals(2, session.history(id).size());
 
         // 重置后继续追加，不应与已有内容粘连
-        session.append(id, MessageType.USER, "turn-3", userContent("三"));
+        session.append(id, JSONMsgType.USER, "turn-3", userContent("三"));
         assertEquals(3, session.messages(id).size());
         assertEquals("三", session.messages(id).get(2).content().get("content"));
     }
@@ -210,7 +210,7 @@ class JsonlSessionTest {
     void reset指定不存在的轮次时报错() {
         Session session = new JsonlSession(root);
         String id = session.create("重置会话");
-        session.append(id, MessageType.USER, "turn-1", userContent("一"));
+        session.append(id, JSONMsgType.USER, "turn-1", userContent("一"));
 
         assertThrows(IllegalArgumentException.class, () -> session.reset(id, "turn-9"));
         assertEquals(1, session.messages(id).size());
@@ -222,8 +222,8 @@ class JsonlSessionTest {
         String id = session.create("工具会话");
         ChatMessage assistant = ChatMessage.assistant("", "先查日志",
                 List.of(new ToolCallInfo("call_1", "inspect_logs", "{}")));
-        session.append(id, MessageType.ASSISTANT, "turn-1", SessionMessage.toMap(assistant));
-        session.append(id, MessageType.TOOL, "turn-1",
+        session.append(id, JSONMsgType.ASSISTANT, "turn-1", SessionMessage.toMap(assistant));
+        session.append(id, JSONMsgType.TOOL, "turn-1",
                 SessionMessage.toMap(new ChatMessage(ChatMessage.Role.TOOL, "128条错误", "call_1")));
 
         List<ChatMessage> history = session.history(id);

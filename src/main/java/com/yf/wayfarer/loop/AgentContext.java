@@ -1,5 +1,6 @@
 package com.yf.wayfarer.loop;
 
+import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.ModelResponse;
 import com.yf.wayfarer.toolcall.ToolContext;
@@ -136,8 +137,8 @@ public final class AgentContext implements ToolContext {
      * 取循环写入的消息汇聚口，仅在 Loop.run 执行期间存在。
      */
     @SuppressWarnings("unchecked")
-    public Consumer<AgentMsg> agentMsgSink() {
-        return (Consumer<AgentMsg>) get(AGENT_MSG_SINK);
+    public Consumer<AgentMessage> agentMsgSink() {
+        return (Consumer<AgentMessage>) get(AGENT_MSG_SINK);
     }
 
     public ConcurrentHashMap<String, Object> asMap() {

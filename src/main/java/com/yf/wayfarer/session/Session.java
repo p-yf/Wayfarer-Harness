@@ -39,7 +39,7 @@ public interface Session {
     /**
      * 向指定会话追加无消息 id 的消息，由实现补齐。
      */
-    default void append(String sessionId, MessageType type, String turnId, Map<String, Object> content) {
+    default void append(String sessionId, JSONMsgType type, String turnId, Map<String, Object> content) {
         Map<String, Object> message = new LinkedHashMap<>();
         message.put("turnId", turnId);
         message.put("type", type.name());
@@ -83,8 +83,8 @@ public interface Session {
         Map<String, List<SessionMessage>> grouped = new LinkedHashMap<>();
         for (SessionMessage message : messages(sessionId)) {
             if (message.turnId() == null
-                    || message.type() == MessageType.COMPACT
-                    || message.type() == MessageType.CUSTOM) {
+                    || message.type() == JSONMsgType.COMPACT
+                    || message.type() == JSONMsgType.CUSTOM) {
                 continue;
             }
             grouped.computeIfAbsent(message.turnId(), key -> new ArrayList<>()).add(message);
@@ -116,7 +116,7 @@ public interface Session {
     static List<ChatMessage> historyOf(List<SessionMessage> all) {
         int compactIndex = -1;
         for (int i = all.size() - 1; i >= 0; i--) {
-            if (all.get(i).type() == MessageType.COMPACT) {
+            if (all.get(i).type() == JSONMsgType.COMPACT) {
                 compactIndex = i;
                 break;
             }
@@ -133,9 +133,9 @@ public interface Session {
         }
         for (int i = compactIndex + 1; i < all.size(); i++) {
             SessionMessage message = all.get(i);
-            if (message.type() == MessageType.USER
-                    || message.type() == MessageType.ASSISTANT
-                    || message.type() == MessageType.TOOL) {
+            if (message.type() == JSONMsgType.USER
+                    || message.type() == JSONMsgType.ASSISTANT
+                    || message.type() == JSONMsgType.TOOL) {
                 history.add(SessionMessage.toChatMessage(message.content()));
             }
         }
@@ -150,7 +150,7 @@ public interface Session {
 
         List<SessionMessage> all = messages(sessionId);
         for (int i = all.size() - 1; i >= 0; i--) {
-            if (all.get(i).type() == MessageType.CUSTOM) {
+            if (all.get(i).type() == JSONMsgType.CUSTOM) {
                 all.get(i).content().forEach(context::put);
                 break;
             }

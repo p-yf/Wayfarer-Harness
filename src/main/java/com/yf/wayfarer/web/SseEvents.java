@@ -26,6 +26,7 @@ public final class SseEvents {
             case AgentMessage.ToolCall call -> Flux.just(event("tool_call", call.call()));
             case AgentMessage.ToolResult result -> Flux.just(event("tool_result", result));
             case AgentMessage.End end -> Flux.just(event("message_end", end));
+            case AgentMessage.Other other -> Flux.just(event("other", other.message()));
         };
     }
 

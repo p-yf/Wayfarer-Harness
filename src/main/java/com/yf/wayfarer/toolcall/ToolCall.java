@@ -50,11 +50,21 @@ public final class ToolCall {
     }
 
     /**
-     * 调用一次已注册的工具。
+     * 调用一次已注册的工具，不注入上下文。
      *
      * @return 工具方法的返回值，void 方法返回 null
      */
     public Object call(ToolCallInfo info) {
+        return call(info, null);
+    }
+
+    /**
+     * 调用一次已注册的工具。
+     * 参数类型实现了 ToolContext 时由框架自动注入上下文，该参数不参与模型参数解析。
+     *
+     * @return 工具方法的返回值，void 方法返回 null
+     */
+    public Object call(ToolCallInfo info, ToolContext context) {
         if (info == null || info.name() == null || info.name().isBlank()) {
             throw new IllegalArgumentException("工具名不能为空");
         }
@@ -68,6 +78,13 @@ public final class ToolCall {
         Object[] values = new Object[parameters.length];
         for (int i = 0; i < parameters.length; i++) {
             Class<?> type = parameters[i].getType();
+            if (ToolContext.class.isAssignableFrom(type)) {
+                if (context == null) {
+                    throw new IllegalStateException("工具需要上下文但未提供: " + info.name());
+                }
+                values[i] = context;
+                continue;
+            }
             if (!arguments.containsKey(parameters[i].getName())) {
                 if (type.isPrimitive()) {
                     throw new IllegalArgumentException("缺少参数: " + parameters[i].getName());
@@ -95,6 +112,10 @@ public final class ToolCall {
         Map<String, Object> properties = new LinkedHashMap<>();
         List<String> required = new ArrayList<>();
         for (Parameter parameter : method.getParameters()) {
+            // 上下文参数由框架注入，不进入模型可见的参数结构
+            if (ToolContext.class.isAssignableFrom(parameter.getType())) {
+                continue;
+            }
             Map<String, Object> schema = new LinkedHashMap<>();
             schema.put("type", schemaType(parameter.getType()));
             ToolParam toolParam = parameter.getAnnotation(ToolParam.class);

@@ -105,6 +105,15 @@ public final class JsonlSession implements Session {
     }
 
     @Override
+    public synchronized void delete(String sessionId) {
+        try {
+            Files.deleteIfExists(resolve(sessionId));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    @Override
     public synchronized void reset(String sessionId, String turnId) {
         Path file = resolve(sessionId);
         List<String> lines = readLines(file);
@@ -280,10 +289,13 @@ public final class JsonlSession implements Session {
     }
 
     /**
-     * 文件名不允许出现路径分隔符、冒号、下划线等字符，统一替换为短横线。
+     * 文件名不允许出现路径分隔符、冒号等字符，统一替换为短横线；
+     * 下划线是元数据分隔符，同样需要替换。空格合法，保留原样。
      */
     private static String sanitize(String name) {
-        String cleaned = name == null ? "" : name.replaceAll("[\\\\/:*?\"<>|_\\s]+", "-");
+        String cleaned = name == null ? "" : name.trim()
+                .replaceAll("[\\\\/:*?\"<>|]+", "-")
+                .replace('_', '-');
         return cleaned.isBlank() ? "session" : cleaned;
     }
 }

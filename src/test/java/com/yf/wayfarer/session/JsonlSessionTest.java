@@ -72,6 +72,26 @@ class JsonlSessionTest {
     }
 
     @Test
+    void 会话名称中的空格原样保留() {
+        Session session = new JsonlSession(root);
+        String id = session.create("修复 auth 模块的类型错误");
+
+        assertEquals("修复 auth 模块的类型错误", session.meta(id).name());
+    }
+
+    @Test
+    void 删除会话后无法再按id打开() {
+        Session session = new JsonlSession(root);
+        String id = session.create("待删除会话");
+        session.append(id, MessageType.USER, "turn-1", userContent("一"));
+
+        session.delete(id);
+
+        assertThrows(IllegalArgumentException.class, () -> session.messages(id));
+        assertTrue(session.list().isEmpty());
+    }
+
+    @Test
     void 打开不存在的会话时报错() {
         Session session = new JsonlSession(root);
 

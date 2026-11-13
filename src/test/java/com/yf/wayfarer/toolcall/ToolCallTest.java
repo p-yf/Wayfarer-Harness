@@ -1,5 +1,6 @@
 package com.yf.wayfarer.toolcall;
 
+import com.yf.wayfarer.loop.AgentContext;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -101,6 +102,49 @@ class ToolCallTest {
 
         Object sum = tools.call(new ToolCallInfo("call_2", "add", "{\"a\":2,\"b\":3}"));
         assertEquals(5, sum);
+    }
+
+    /**
+     * @author yyf
+     * @description 带上下文的测试用工具集
+     */
+    static class ContextTools {
+
+        @Tool(description = "读取上下文中的值")
+        public String readContext(AgentContext context, @ToolParam(description = "键名") String key) {
+            return String.valueOf(context.get(key));
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void 上下文参数不暴露给模型() {
+        List<ToolDefinition> definitions = new ToolCall().parse(new ContextTools());
+
+        ToolDefinition definition = definitions.get(0);
+        Map<String, Object> properties = (Map<String, Object>) definition.parameters().get("properties");
+        assertEquals(List.of("key"), new java.util.ArrayList<>(properties.keySet()));
+        assertEquals(List.of("key"), definition.parameters().get("required"));
+    }
+
+    @Test
+    void 调用工具时自动注入上下文() {
+        ToolCall tools = new ToolCall();
+        tools.parse(new ContextTools());
+        AgentContext context = new AgentContext().put("store:cursor", "cursor-7");
+
+        Object result = tools.call(new ToolCallInfo("call_1", "readContext", "{\"key\":\"store:cursor\"}"), context);
+
+        assertEquals("cursor-7", result);
+    }
+
+    @Test
+    void 未提供上下文时调用带上下文的工具报错() {
+        ToolCall tools = new ToolCall();
+        tools.parse(new ContextTools());
+
+        assertThrows(IllegalStateException.class,
+                () -> tools.call(new ToolCallInfo("call_1", "readContext", "{\"key\":\"store:cursor\"}")));
     }
 
     @Test

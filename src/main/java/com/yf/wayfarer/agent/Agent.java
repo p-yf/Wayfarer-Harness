@@ -1,5 +1,6 @@
 package com.yf.wayfarer.agent;
 
+import com.yf.wayfarer.agent.modelchain.MemoryCompressHandler;
 import com.yf.wayfarer.agent.modelchain.MemoryManageHandler;
 import com.yf.wayfarer.agent.modelchain.ModelHandler;
 import com.yf.wayfarer.agent.toolchain.ToolCallHandler;
@@ -13,6 +14,7 @@ import com.yf.wayfarer.model.ModelResponse;
 import com.yf.wayfarer.session.MessageType;
 import com.yf.wayfarer.session.Session;
 import com.yf.wayfarer.session.SessionMessage;
+import com.yf.wayfarer.session.UnloadedMessageStore;
 import com.yf.wayfarer.toolcall.ToolCall;
 import com.yf.wayfarer.toolcall.ToolCallInfo;
 import com.yf.wayfarer.toolcall.ToolDefinition;
@@ -33,17 +35,29 @@ public class Agent extends Loop {
 
     private final Session session;
 
+    /**
+     * @param unloadedStore 卸载消息存储，压缩时把大消息正文搬入其中
+     * @param contextWindow 上下文窗口 token 数，决定压缩阈值
+     */
     public Agent(ChatModel model, List<ToolDefinition> tools, ToolCall toolCall,
-                 Integer maxTurns, Session session) {
-        super(Chain.of(new ModelHandler(model, tools), new MemoryManageHandler()),
+                 Integer maxTurns, Session session, UnloadedMessageStore unloadedStore,
+                 int contextWindow) {
+        super(Chain.of(new MemoryCompressHandler(model, unloadedStore, contextWindow,
+                                0.7, 0.01, 0.02, 0.5, 100),
+                        new ModelHandler(model, tools),
+                        new MemoryManageHandler()),
                 Chain.of(new ToolCallHandler(toolCall)), maxTurns);
         this.session = session;
     }
 
     /**
-     * 在指定会话上运行，会话内容会自动恢复到上下文。
+     * 在上下文中指定的会话上运行，会话内容会自动恢复到上下文。
      */
-    public Flux<AgentMsg> stream(AgentContext context, String sessionId) {
+    public Flux<AgentMsg> stream(AgentContext context) {
+        String sessionId = context.sessionId();
+        if (sessionId == null || sessionId.isBlank()) {
+            throw new IllegalArgumentException("上下文缺少会话 id");
+        }
         session.restore(sessionId, context);
         // 调用方可通过上下文预置轮次 id，使本轮问答归入同一轮次
         String provided = context.turnId();

@@ -19,7 +19,7 @@ import java.util.Map;
  * agent 接口。
  *
  * @author yyf
- * @description 提供按会话流式运行与终止运行两个接口
+ * @description 提供按请求体中的会话 id 流式运行与终止运行两个接口
  */
 @RestController
 @RequestMapping("/api/agent")
@@ -33,14 +33,19 @@ public class AgentController {
 
     /**
      * 以 server-sent events 流式返回 agent 消息。
+     * 请求体需包含 sessionId，可选 agentName 与任意 store 状态。
      */
-    @PostMapping(value = "/stream/{sessionId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<AgentMsg> stream(@PathVariable String sessionId,
-                                 @RequestBody(required = false) Map<String, Object> payload) {
-        if (agentService.isRunning(sessionId)) {
-            return Flux.error(new ResponseStatusException(HttpStatus.CONFLICT, "会话正在运行：" + sessionId));
+    @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<AgentMsg> stream(@RequestBody Map<String, Object> payload) {
+        Object rawSessionId = payload.get("sessionId");
+        if (rawSessionId == null || String.valueOf(rawSessionId).isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少参数：sessionId");
         }
-        return agentService.stream(sessionId, payload);
+        String sessionId = String.valueOf(rawSessionId);
+        if (agentService.isRunning(sessionId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "会话正在运行：" + sessionId);
+        }
+        return agentService.stream(payload);
     }
 
     /**

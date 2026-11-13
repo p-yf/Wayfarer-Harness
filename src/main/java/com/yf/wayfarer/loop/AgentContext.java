@@ -2,11 +2,13 @@ package com.yf.wayfarer.loop;
 
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.ModelResponse;
+import com.yf.wayfarer.toolcall.ToolContext;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
 /**
@@ -15,7 +17,7 @@ import java.util.function.Consumer;
  * @author yyf
  * @description 以 ConcurrentHashMap 保存链路间共享的状态，并约定模型响应与消息汇聚口的存放键
  */
-public final class AgentContext {
+public final class AgentContext implements ToolContext {
 
     /**
      * 模型链需要把完整响应写入该键，供循环判断是否继续。
@@ -38,11 +40,67 @@ public final class AgentContext {
     public static final String TURN_ID = "turnId";
 
     /**
+     * 当前轮次序号，从 1 开始，由 Loop 在每一轮开始时写入。
+     */
+    public static final String TURN_INDEX = "turnIndex";
+
+    /**
+     * 本次运行对应的会话 id，由调用方在运行前写入。
+     */
+    public static final String SESSION_ID = "sessionId";
+
+    /**
+     * 拼接好的系统提示词，由调用方在运行前写入，模型调用时作为首条 system 消息。
+     */
+    public static final String SYSTEM_PROMPT = "systemprompt";
+
+    /**
+     * 当前 agent 名称，由调用方在运行前写入，HITL 确认键与提示词目录都依赖它。
+     */
+    public static final String AGENT_NAME = "agentName";
+
+    /**
+     * 正在执行的工具调用 id，由工具链在调用每个工具前写入，工具据此找到自己的 HITL 等待项。
+     */
+    public static final String TOOL_CALL_ID = "toolCallId";
+
+    /**
+     * 正在执行的工具名称，由工具链在调用每个工具前写入，供 HITL 待确认列表展示。
+     */
+    public static final String TOOL_NAME = "toolName";
+
+    /**
      * 可持久化状态的键前缀，会话结束时统一写入会话文件。
      */
     public static final String STORE_PREFIX = "store:";
 
     private final ConcurrentHashMap<String, Object> values = new ConcurrentHashMap<>();
+
+    /**
+     * 运行被取消时执行的回调，例如让工具侧正在等待的确认立即结束。
+     */
+    private final List<Runnable> cancelHooks = new CopyOnWriteArrayList<>();
+
+    /**
+     * 登记取消回调，供循环取消时统一触发。
+     */
+    public void onCancel(Runnable hook) {
+        cancelHooks.add(hook);
+    }
+
+    /**
+     * 执行并清空已登记的取消回调。
+     */
+    public void fireCancel() {
+        for (Runnable hook : cancelHooks) {
+            try {
+                hook.run();
+            } catch (RuntimeException ignored) {
+                // 单个回调失败不影响其余回调
+            }
+        }
+        cancelHooks.clear();
+    }
 
     public AgentContext put(String key, Object value) {
         values.put(key, value);
@@ -91,6 +149,41 @@ public final class AgentContext {
      */
     public String turnId() {
         return get(TURN_ID, String.class);
+    }
+
+    /**
+     * 当前会话 id，未设置时为 null。
+     */
+    public String sessionId() {
+        return get(SESSION_ID, String.class);
+    }
+
+    /**
+     * 当前轮次序号，未进入运行时为 null。
+     */
+    public Integer turnIndex() {
+        return get(TURN_INDEX, Integer.class);
+    }
+
+    /**
+     * 正在执行的工具调用 id，未在执行工具时为 null。
+     */
+    public String toolCallId() {
+        return get(TOOL_CALL_ID, String.class);
+    }
+
+    /**
+     * 正在执行的工具名称，未在执行工具时为 null。
+     */
+    public String toolName() {
+        return get(TOOL_NAME, String.class);
+    }
+
+    /**
+     * 拼接好的系统提示词，未设置时为 null。
+     */
+    public String systemPrompt() {
+        return get(SYSTEM_PROMPT, String.class);
     }
 
     /**

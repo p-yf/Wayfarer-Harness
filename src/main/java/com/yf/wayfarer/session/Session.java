@@ -53,6 +53,11 @@ public interface Session {
     List<SessionMessage> messages(String sessionId);
 
     /**
+     * 删除指定会话的全部消息，会话本身随之移除。
+     */
+    void delete(String sessionId);
+
+    /**
      * 删除指定会话中该轮次及其之后的全部消息。
      */
     void reset(String sessionId, String turnId);

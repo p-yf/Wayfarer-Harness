@@ -1,7 +1,10 @@
 package com.yf.wayfarer.web;
 
+import com.yf.wayfarer.hitl.HitlService;
+import com.yf.wayfarer.prompt.SystemPromptStore;
 import com.yf.wayfarer.session.JsonlSession;
 import com.yf.wayfarer.session.Session;
+import com.yf.wayfarer.session.UnloadedMessageStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,7 +15,7 @@ import java.nio.file.Path;
  * web 层装配。
  *
  * @author yyf
- * @description 按配置创建会话存储
+ * @description 按配置创建会话存储、卸载消息存储与系统提示词存储
  */
 @Configuration
 public class SessionConfiguration {
@@ -21,5 +24,23 @@ public class SessionConfiguration {
     public Session session(@Value("${wayfarer.session.root:./sessions}") String root,
                            @Value("${wayfarer.session.compact-threshold:0}") int compactThreshold) {
         return new JsonlSession(Path.of(root), compactThreshold);
+    }
+
+    @Bean
+    public UnloadedMessageStore unloadedMessageStore(
+            @Value("${wayfarer.unload.root:./unloadedmessage}") String root) {
+        return new UnloadedMessageStore(Path.of(root));
+    }
+
+    @Bean
+    public SystemPromptStore systemPromptStore(
+            @Value("${wayfarer.prompt.root:./systemprompt}") String root) {
+        return new SystemPromptStore(Path.of(root));
+    }
+
+    @Bean
+    public HitlService hitlService(
+            @Value("${wayfarer.hitl.timeout-seconds:300}") long timeoutSeconds) {
+        return new HitlService(timeoutSeconds);
     }
 }

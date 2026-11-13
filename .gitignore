@@ -7,11 +7,6 @@ sessions/
 # 设计文档
 docs/
 
-# 前端
-node_modules/
-dist/
-.vite/
-
 # 进程崩溃日志
 hs_err_pid*.log
 replay_pid*.log

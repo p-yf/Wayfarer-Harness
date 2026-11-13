@@ -4,6 +4,7 @@ import com.yf.wayfarer.session.MessageType;
 import com.yf.wayfarer.session.Session;
 import com.yf.wayfarer.session.SessionMessage;
 import com.yf.wayfarer.session.SessionMeta;
+import com.yf.wayfarer.session.UnloadedMessageStore;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -29,9 +30,11 @@ import java.util.UUID;
 public class SessionController {
 
     private final Session session;
+    private final UnloadedMessageStore unloadedStore;
 
-    public SessionController(Session session) {
+    public SessionController(Session session, UnloadedMessageStore unloadedStore) {
         this.session = session;
+        this.unloadedStore = unloadedStore;
     }
 
     @PostMapping
@@ -99,6 +102,19 @@ public class SessionController {
     @PostMapping("/{sessionId}/clone")
     public Map<String, Object> clone(@PathVariable String sessionId) {
         return idResult(session.clone(sessionId));
+    }
+
+    /**
+     * 删除会话，同时清理该会话的卸载消息。
+     */
+    @DeleteMapping("/{sessionId}")
+    public Map<String, Object> delete(@PathVariable String sessionId) {
+        session.delete(sessionId);
+        unloadedStore.deleteAll(sessionId);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("sessionId", sessionId);
+        result.put("deleted", true);
+        return result;
     }
 
     @DeleteMapping("/{sessionId}/turns/{turnId}")

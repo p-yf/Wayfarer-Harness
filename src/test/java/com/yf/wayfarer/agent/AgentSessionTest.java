@@ -11,6 +11,7 @@ import com.yf.wayfarer.session.JsonlSession;
 import com.yf.wayfarer.session.MessageType;
 import com.yf.wayfarer.session.Session;
 import com.yf.wayfarer.session.SessionMessage;
+import com.yf.wayfarer.session.UnloadedMessageStore;
 import com.yf.wayfarer.toolcall.ToolCall;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -92,9 +93,10 @@ class AgentSessionTest {
         session.append(sessionId, MessageType.USER, "turn-user", userContent("查一下错误日志"));
 
         AgentContext context = new AgentContext();
+        context.put(AgentContext.SESSION_ID, sessionId);
         context.put("store:cursor", "cursor-1");
 
-        List<AgentMsg> messages = agent().stream(context, sessionId).collectList().block();
+        List<AgentMsg> messages = agent().stream(context).collectList().block();
         assertNotNull(messages);
         assertTrue(messages.size() >= 1);
         assertNotNull(context.turnId());
@@ -117,13 +119,15 @@ class AgentSessionTest {
         String sessionId = session.create("会话二");
         session.append(sessionId, MessageType.USER, "turn-1", userContent("第一轮"));
         AgentContext first = new AgentContext();
+        first.put(AgentContext.SESSION_ID, sessionId);
         first.put("store:step", "1");
-        agent().stream(first, sessionId).collectList().block();
+        agent().stream(first).collectList().block();
 
         // 新一轮：追加用户消息，再按同一会话 id 运行
         session.append(sessionId, MessageType.USER, "turn-2", userContent("第二轮"));
         AgentContext second = new AgentContext();
-        agent().stream(second, sessionId).collectList().block();
+        second.put(AgentContext.SESSION_ID, sessionId);
+        agent().stream(second).collectList().block();
 
         assertEquals("1", second.get("store:step"), "上一轮的 store 状态应恢复到上下文");
         assertEquals(4, second.messages().size(), "恢复后应已有两轮问答共四条消息");
@@ -140,7 +144,9 @@ class AgentSessionTest {
     void 恢复会话后消息顺序为历史加本轮回复() {
         String sessionId = session.create("会话三");
         session.append(sessionId, MessageType.USER, "turn-1", userContent("你好"));
-        agent().stream(new AgentContext(), sessionId).collectList().block();
+        AgentContext runContext = new AgentContext();
+        runContext.put(AgentContext.SESSION_ID, sessionId);
+        agent().stream(runContext).collectList().block();
 
         AgentContext restored = new AgentContext();
         session.restore(sessionId, restored);
@@ -154,7 +160,8 @@ class AgentSessionTest {
     }
 
     private Agent agent() {
-        return new Agent(model, List.of(), new ToolCall(), null, session);
+        return new Agent(model, List.of(), new ToolCall(), null, session,
+                new UnloadedMessageStore(root.resolve("unloaded")), 128_000);
     }
 
     private static Map<String, Object> userContent(String text) {

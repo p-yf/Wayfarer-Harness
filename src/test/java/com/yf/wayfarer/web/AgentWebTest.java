@@ -1,6 +1,8 @@
 package com.yf.wayfarer.web;
 
 import com.sun.net.httpserver.HttpServer;
+import com.yf.wayfarer.hitl.HitlService;
+import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.session.MessageType;
 import com.yf.wayfarer.session.Session;
 import com.yf.wayfarer.session.SessionMessage;
@@ -23,6 +25,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -48,13 +51,14 @@ class AgentWebTest {
 
     private static final HttpServer MODEL_SERVER;
     private static final Path SESSION_ROOT;
+    private static final AtomicReference<String> MODEL_REQUEST = new AtomicReference<>("");
 
     static {
         try {
             MODEL_SERVER = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
             MODEL_SERVER.createContext("/", exchange -> {
-                // 读取请求体，避免连接被提前关闭
-                exchange.getRequestBody().readAllBytes();
+                // 记录请求体，供断言系统提示词与历史是否送达模型
+                MODEL_REQUEST.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
                 byte[] body = SSE.getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
                 exchange.sendResponseHeaders(200, body.length);
@@ -76,6 +80,8 @@ class AgentWebTest {
         registry.add("wayfarer.model.base-url",
                 () -> "http://localhost:" + MODEL_SERVER.getAddress().getPort());
         registry.add("wayfarer.session.root", SESSION_ROOT::toString);
+        registry.add("wayfarer.unload.root", () -> SESSION_ROOT.resolve("unloaded").toString());
+        registry.add("wayfarer.prompt.root", () -> SESSION_ROOT.resolve("prompt").toString());
         registry.add("wayfarer.agent.max-turns", () -> 1);
     }
 
@@ -89,6 +95,9 @@ class AgentWebTest {
 
     @Autowired
     Session session;
+
+    @Autowired
+    HitlService hitlService;
 
     @Test
     void 创建会话并出现在会话列表中() {
@@ -172,10 +181,11 @@ class AgentWebTest {
                 .expectStatus().isOk();
 
         Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("sessionId", sessionId);
         payload.put("turnId", "turn-web");
         payload.put("store:cursor", "cursor-9");
 
-        List<String> events = client.post().uri("/api/agent/stream/{id}", sessionId)
+        List<String> events = client.post().uri("/api/agent/stream")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(payload)
                 .exchange()
@@ -210,6 +220,150 @@ class AgentWebTest {
 
         assertTrue(result != null);
         assertFalse((Boolean) result.get("stopped"));
+    }
+
+    @Test
+    void 系统提示词按顺序拼接并送达模型() {
+        // 顺序 2 先存、顺序 1 后存，验证按顺序而非写入顺序拼接
+        client.put().uri("/api/prompts/{a}/{n}/{o}", "wayfarer", "role", 2)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("content", "第二条提示词"))
+                .exchange()
+                .expectStatus().isOk();
+        client.put().uri("/api/prompts/{a}/{n}/{o}", "wayfarer", "role", 1)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("content", "第一条提示词"))
+                .exchange()
+                .expectStatus().isOk();
+
+        String sessionId = session.create("提示词会话");
+        session.append(sessionId, MessageType.USER, "turn-1", userContent("你好"));
+
+        client.post().uri("/api/agent/stream")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("sessionId", sessionId))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(String.class)
+                .returnResult();
+
+        String request = MODEL_REQUEST.get();
+        assertTrue(request.contains("第一条提示词"), "请求应包含第一条提示词：" + request);
+        assertTrue(request.contains("第二条提示词"), "请求应包含第二条提示词：" + request);
+        assertTrue(request.indexOf("第一条提示词") < request.indexOf("第二条提示词"),
+                "提示词应按顺序拼接：" + request);
+    }
+
+    @Test
+    void 提示词支持查询与删除() {
+        client.put().uri("/api/prompts/{a}/{n}/{o}", "wayfarer", "extra", 3)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("content", "可删除的提示词"))
+                .exchange()
+                .expectStatus().isOk();
+
+        Map<?, ?> single = client.get().uri("/api/prompts/{a}/{n}/{o}", "wayfarer", "extra", 3)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(Map.class)
+                .returnResult()
+                .getResponseBody();
+        assertTrue(single != null && "可删除的提示词".equals(single.get("content")));
+
+        Map<?, ?> deleted = client.delete().uri("/api/prompts/{a}/{n}/{o}", "wayfarer", "extra", 3)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(Map.class)
+                .returnResult()
+                .getResponseBody();
+        assertTrue(deleted != null && Boolean.TRUE.equals(deleted.get("deleted")));
+
+        client.get().uri("/api/prompts/{a}/{n}/{o}", "wayfarer", "extra", 3)
+                .exchange()
+                .expectStatus().isBadRequest();
+    }
+
+    @Test
+    void 删除会话后列表中不再出现() {
+        String sessionId = session.create("待删除会话");
+        session.append(sessionId, MessageType.USER, "turn-1", userContent("一"));
+
+        client.delete().uri("/api/sessions/{id}", sessionId)
+                .exchange()
+                .expectStatus().isOk();
+
+        SessionMeta[] all = client.get().uri("/api/sessions")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(SessionMeta[].class)
+                .returnResult()
+                .getResponseBody();
+
+        assertTrue(all != null);
+        assertFalse(java.util.Arrays.stream(all).anyMatch(item -> sessionId.equals(item.id())));
+    }
+
+    @Test
+    void 缺少会话id时返回错误() {
+        client.post().uri("/api/agent/stream")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("turnId", "t1"))
+                .exchange()
+                .expectStatus().isBadRequest();
+    }
+
+    @Test
+    void 人工确认接口写入决定() throws Exception {
+        AgentContext context = new AgentContext();
+        context.put(AgentContext.SESSION_ID, "hitl-session");
+        context.put(AgentContext.AGENT_NAME, "wayfarer");
+        context.put(AgentContext.TOOL_CALL_ID, "call_1");
+        context.put(AgentContext.TOOL_NAME, "shell");
+        AtomicReference<Map<String, Object>> decision = new AtomicReference<>();
+        // 工具在执行过程中自行等待决定，放到独立线程模拟真实运行环境
+        Thread worker = new Thread(() -> decision.set(hitlService.await(context)));
+        worker.setDaemon(true);
+        worker.start();
+        waitPending();
+
+        Map<?, ?> result = client.post().uri("/api/hitl")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("toolCallId", "call_1", "approved", true))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(Map.class)
+                .returnResult()
+                .getResponseBody();
+
+        worker.join(5000);
+        assertTrue(result != null && Boolean.TRUE.equals(result.get("delivered")));
+        assertEquals(true, decision.get().get("approved"), "请求体应整体写入等待项");
+
+        HitlService.Pending[] pending = client.get()
+                .uri(uri -> uri.path("/api/hitl/pending").queryParam("agent", "wayfarer").build())
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(HitlService.Pending[].class)
+                .returnResult()
+                .getResponseBody();
+        assertTrue(pending != null && pending.length == 0, "确认后不应再有待办");
+    }
+
+    @Test
+    void 没有待确认项时返回错误() {
+        client.post().uri("/api/hitl")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("toolCallId", "nobody-waiting"))
+                .exchange()
+                .expectStatus().isBadRequest();
+    }
+
+    private void waitPending() throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 5000;
+        while (hitlService.pending("wayfarer").isEmpty() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10);
+        }
+        assertEquals(1, hitlService.pending("wayfarer").size(), "应登记待确认项");
     }
 
     private static Map<String, Object> userContent(String text) {

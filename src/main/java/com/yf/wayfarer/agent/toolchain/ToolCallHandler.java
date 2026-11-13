@@ -7,6 +7,7 @@ import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.ModelResponse;
 import com.yf.wayfarer.toolcall.ToolCall;
 import com.yf.wayfarer.toolcall.ToolCallInfo;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.function.Consumer;
@@ -15,7 +16,8 @@ import java.util.function.Consumer;
  * 工具调用处理器。
  *
  * @author yyf
- * @description 执行模型请求的每个工具调用，推送结果消息并把 tool 消息按轮次拼接到消息历史
+ * @description 按顺序执行模型请求的每个工具调用，把工具 id 与名称写入上下文供工具自行鉴权，
+ * 执行结果作为 tool 消息推送并按轮次拼接到消息历史
  */
 public class ToolCallHandler implements ChainHandler {
 
@@ -27,20 +29,28 @@ public class ToolCallHandler implements ChainHandler {
 
     @Override
     public Mono<Void> run(AgentContext context, Mono<Void> next) {
+        ModelResponse response = context.modelResponse();
+        if (response == null || response.toolCalls().isEmpty()) {
+            return next;
+        }
+        return Flux.fromIterable(response.toolCalls())
+                .concatMap(info -> execute(context, info))
+                .then(next);
+    }
+
+    private Mono<Void> execute(AgentContext context, ToolCallInfo info) {
         return Mono.fromRunnable(() -> {
-            ModelResponse response = context.modelResponse();
-            if (response == null) {
-                return;
-            }
+            // 工具在执行过程中可据此定位自己的 HITL 等待项
+            context.put(AgentContext.TOOL_CALL_ID, info.id());
+            context.put(AgentContext.TOOL_NAME, info.name());
+
+            Object result = toolCall.call(info, context);
+            String content = result == null ? "" : String.valueOf(result);
             Consumer<AgentMsg> sink = context.agentMsgSink();
-            for (ToolCallInfo info : response.toolCalls()) {
-                Object result = toolCall.call(info);
-                String content = result == null ? "" : String.valueOf(result);
-                if (sink != null) {
-                    sink.accept(AgentMsg.toolResult(info, content));
-                }
-                context.messages().add(new ChatMessage(ChatMessage.Role.TOOL, content, info.id()));
+            if (sink != null) {
+                sink.accept(AgentMsg.toolResult(info, content));
             }
-        }).then(next);
+            context.messages().add(new ChatMessage(ChatMessage.Role.TOOL, content, info.id()));
+        });
     }
 }

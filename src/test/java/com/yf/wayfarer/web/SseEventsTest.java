@@ -23,39 +23,42 @@ class SseEventsTest {
 
     @Test
     void 文本增量映射为delta事件() {
-        ServerSentEvent<Object> event = single(new AgentMessage.Text("你好"));
+        ServerSentEvent<Object> event = single(new AgentMessage.Text("trace-1", "你好"));
 
         assertEquals("delta", event.event());
-        assertEquals(new AgentMessage.Text("你好"), event.data());
+        assertEquals(new AgentMessage.Text("trace-1", "你好"), event.data());
     }
 
     @Test
     void 思考增量映射为reasoning事件() {
-        ServerSentEvent<Object> event = single(new AgentMessage.Reasoning("先想一想"));
+        ServerSentEvent<Object> event = single(new AgentMessage.Reasoning("trace-1", "先想一想"));
 
         assertEquals("reasoning", event.event());
-        assertEquals(new AgentMessage.Reasoning("先想一想"), event.data());
+        assertEquals(new AgentMessage.Reasoning("trace-1", "先想一想"), event.data());
     }
 
     @Test
-    void 工具调用映射为toolCall事件并复用工具调用信息() {
-        ServerSentEvent<Object> event = single(new AgentMessage.ToolCall(CALL));
+    void 工具调用映射为toolCall事件并带traceId() {
+        AgentMessage message = new AgentMessage.ToolCall("trace-1", CALL);
+
+        ServerSentEvent<Object> event = single(message);
 
         assertEquals("tool_call", event.event());
-        assertEquals(CALL, event.data());
+        assertEquals(message, event.data());
     }
 
     @Test
     void 工具结果映射为toolResult事件() {
-        ServerSentEvent<Object> event = single(new AgentMessage.ToolResult("call_1", "文件内容"));
+        ServerSentEvent<Object> event = single(new AgentMessage.ToolResult("trace-1", "call_1", "文件内容"));
 
         assertEquals("tool_result", event.event());
-        assertEquals(new AgentMessage.ToolResult("call_1", "文件内容"), event.data());
+        assertEquals(new AgentMessage.ToolResult("trace-1", "call_1", "文件内容"), event.data());
     }
 
     @Test
     void 收尾消息映射为messageEnd事件() {
-        AgentMessage message = new AgentMessage.End(FinishReason.STOP, new Usage(10L, 20L, 30L, 5L, 5L));
+        AgentMessage message = new AgentMessage.End("trace-1", FinishReason.STOP,
+                new Usage(10L, 20L, 30L, 5L, 5L));
 
         ServerSentEvent<Object> event = single(message);
 

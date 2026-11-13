@@ -133,7 +133,9 @@ public class OpenAIChatModel implements ChatModel {
     private ChatCompletionCreateParams toParams(ChatRequest request, String streamId) {
         ChatCompletionCreateParams.Builder builder = ChatCompletionCreateParams.builder()
                 .model(config.model())
-                .putAdditionalHeader(STREAM_ID_HEADER, streamId);
+                .putAdditionalHeader(STREAM_ID_HEADER, streamId)
+                // DeepSeek 思考模式：reasoning_effort 同时控制开关与强度
+                .putAdditionalBodyProperty("reasoning_effort", JsonValue.from(config.reasoningEffort()));
         if (config.temperature() != null) {
             builder.temperature(config.temperature());
         }

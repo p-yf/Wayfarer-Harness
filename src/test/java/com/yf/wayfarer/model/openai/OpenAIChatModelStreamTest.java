@@ -322,6 +322,8 @@ class OpenAIChatModelStreamTest {
         String body = requestBody.get();
         assertTrue(body.contains("\"temperature\":0.3"), "请求体应包含 temperature，实际为 " + body);
         assertTrue(body.contains("\"max_tokens\":128"), "请求体应包含 max_tokens，实际为 " + body);
+        assertTrue(body.contains("\"reasoning_effort\":\"high\""),
+                "请求体应包含默认思考强度，实际为 " + body);
     }
 
     @Test

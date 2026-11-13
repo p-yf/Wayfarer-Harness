@@ -23,7 +23,7 @@ import java.util.UUID;
  * 会话接口。
  *
  * @author yyf
- * @description 提供会话的创建、列表、详情、消息查看、按轮次滑动取历史，以及 fork、clone、reset 操作
+ * @description 提供会话的创建、列表、详情、消息查看、按 trace 滑动取历史，以及 fork、clone、reset 操作
  */
 @RestController
 @RequestMapping("/api/sessions")
@@ -54,25 +54,25 @@ public class SessionController {
     }
 
     /**
-     * 向会话追加一条消息，未指定轮次 id 时自动生成并返回，便于与该轮运行对应。
+     * 向会话追加一条消息，未指定 trace id 时自动生成并返回，便于与该次运行对应。
      */
     @SuppressWarnings("unchecked")
     @PostMapping("/{sessionId}/messages")
     public Map<String, Object> append(@PathVariable String sessionId, @RequestBody Map<String, Object> body) {
-        String turnId = body.get("turnId") == null || String.valueOf(body.get("turnId")).isBlank()
+        String traceId = body.get("traceId") == null || String.valueOf(body.get("traceId")).isBlank()
                 ? UUID.randomUUID().toString()
-                : String.valueOf(body.get("turnId"));
+                : String.valueOf(body.get("traceId"));
         JSONMsgType type = JSONMsgType.valueOf(
                 String.valueOf(body.getOrDefault("type", JSONMsgType.USER.name())).toUpperCase());
         Object rawContent = body.get("content");
         Map<String, Object> content = rawContent instanceof Map<?, ?> map
                 ? (Map<String, Object>) map
                 : Map.of();
-        session.append(sessionId, type, turnId, content);
+        session.append(sessionId, type, traceId, content);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("sessionId", sessionId);
-        result.put("turnId", turnId);
+        result.put("traceId", traceId);
         return result;
     }
 
@@ -85,18 +85,18 @@ public class SessionController {
     }
 
     /**
-     * 按轮次滑动取历史：返回 turnId 之前最近 turns 轮的对话消息，turnId 为空时取最近 turns 轮。
+     * 按 trace 滑动取历史：返回 traceId 之前最近 turns 轮的对话消息，traceId 为空时取最近 turns 轮。
      */
     @GetMapping("/{sessionId}/history")
     public List<SessionMessage> history(@PathVariable String sessionId,
-                                        @RequestParam(required = false) String turnId,
+                                        @RequestParam(required = false) String traceId,
                                         @RequestParam(defaultValue = "3") int turns) {
-        return session.historyBefore(sessionId, turnId, turns);
+        return session.historyBefore(sessionId, traceId, turns);
     }
 
     @PostMapping("/{sessionId}/fork")
-    public Map<String, Object> fork(@PathVariable String sessionId, @RequestParam String turnId) {
-        return idResult(session.fork(sessionId, turnId));
+    public Map<String, Object> fork(@PathVariable String sessionId, @RequestParam String traceId) {
+        return idResult(session.fork(sessionId, traceId));
     }
 
     @PostMapping("/{sessionId}/clone")
@@ -117,12 +117,12 @@ public class SessionController {
         return result;
     }
 
-    @DeleteMapping("/{sessionId}/turns/{turnId}")
-    public Map<String, Object> reset(@PathVariable String sessionId, @PathVariable String turnId) {
-        session.reset(sessionId, turnId);
+    @DeleteMapping("/{sessionId}/traces/{traceId}")
+    public Map<String, Object> reset(@PathVariable String sessionId, @PathVariable String traceId) {
+        session.reset(sessionId, traceId);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("sessionId", sessionId);
-        result.put("resetFrom", turnId);
+        result.put("resetFrom", traceId);
         return result;
     }
 

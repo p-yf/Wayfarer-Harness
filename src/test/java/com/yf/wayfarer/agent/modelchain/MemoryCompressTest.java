@@ -199,19 +199,20 @@ class MemoryCompressTest {
     @Test
     void 配置非法时报错() {
         assertThrows(IllegalArgumentException.class,
-                () -> new MemoryCompressHandler(model, store, 0, 0.7, 0.01, 0.02, 0.5, 100));
+                () -> new MemoryCompactConfig(0, 0.7, 0.01, 0.02, 0.5, 100, true));
         assertThrows(IllegalArgumentException.class,
-                () -> new MemoryCompressHandler(model, store, 1000, 1.5, 0.01, 0.02, 0.5, 100));
+                () -> new MemoryCompactConfig(1000, 1.5, 0.01, 0.02, 0.5, 100, true));
         assertThrows(IllegalArgumentException.class,
-                () -> new MemoryCompressHandler(model, store, 1000, 0.7, 0, 0.02, 0.5, 100));
+                () -> new MemoryCompactConfig(1000, 0.7, 0.0, 0.02, 0.5, 100, true));
         assertThrows(IllegalArgumentException.class,
-                () -> new MemoryCompressHandler(model, store, 1000, 0.7, 0.01, 0.02, 0.5, -1));
+                () -> new MemoryCompactConfig(1000, 0.7, 0.01, 0.02, 0.5, -1, true));
     }
 
     private MemoryCompressHandler handler(int window, double toolRatio, double messageRatio,
                                           double compressRatio, int keepChars) {
-        return new MemoryCompressHandler(model, store, window, 0.7, toolRatio, messageRatio,
-                compressRatio, keepChars);
+        MemoryCompactConfig compact = new MemoryCompactConfig(
+                window, 0.7, toolRatio, messageRatio, compressRatio, keepChars, true);
+        return new MemoryCompressHandler(model, store, compact);
     }
 
     private void run(MemoryCompressHandler handler, AgentContext context) {

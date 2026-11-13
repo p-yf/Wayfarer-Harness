@@ -1,6 +1,9 @@
 package com.yf.wayfarer.web;
 
+import com.yf.wayfarer.agent.modelchain.MemoryCompactConfig;
+import com.yf.wayfarer.config.ConfigStore;
 import com.yf.wayfarer.hitl.HitlService;
+import com.yf.wayfarer.model.ModelConfig;
 import com.yf.wayfarer.prompt.SystemPromptStore;
 import com.yf.wayfarer.session.JsonlSession;
 import com.yf.wayfarer.session.Session;
@@ -42,5 +45,17 @@ public class SessionConfiguration {
     public HitlService hitlService(
             @Value("${wayfarer.hitl.timeout-seconds:300}") long timeoutSeconds) {
         return new HitlService(timeoutSeconds);
+    }
+
+    @Bean
+    public ConfigStore<ModelConfig> modelConfigStore(
+            @Value("${wayfarer.model-config.root:./modelconfig}") String root) {
+        return new ConfigStore<>(Path.of(root), ModelConfig.class);
+    }
+
+    @Bean
+    public ConfigStore<MemoryCompactConfig> compactConfigStore(
+            @Value("${wayfarer.memory-compact-config.root:./memorycompactconfig}") String root) {
+        return new ConfigStore<>(Path.of(root), MemoryCompactConfig.class);
     }
 }

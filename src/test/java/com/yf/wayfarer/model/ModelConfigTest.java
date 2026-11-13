@@ -7,6 +7,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * @author yyf
@@ -44,6 +45,24 @@ class ModelConfigTest {
                 () -> new ModelConfig("k", "m", 2.1, null));
         assertThrows(IllegalArgumentException.class,
                 () -> new ModelConfig("k", "m", null, 0L));
+    }
+
+    @Test
+    void 思考强度归一化并默认开启() {
+        assertEquals("high", new ModelConfig("test-key", "deepseek-flash").reasoningEffort());
+        assertEquals("low", effortOf("minimal"));
+        assertEquals("low", effortOf("low"));
+        assertEquals("high", effortOf("medium"));
+        assertEquals("high", effortOf("xhigh"));
+        assertEquals("none", effortOf("none"));
+        assertEquals("max", effortOf("max"));
+        assertThrows(IllegalArgumentException.class, () -> effortOf("超高"));
+        assertTrue(new ModelConfig("test-key", "deepseek-flash").enabled());
+    }
+
+    private static String effortOf(String effort) {
+        return new ModelConfig("test-key", ModelConfig.DEFAULT_BASE_URL, "deepseek-flash",
+                null, null, effort, true).reasoningEffort();
     }
 
     @Test

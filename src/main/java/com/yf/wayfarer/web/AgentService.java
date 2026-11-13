@@ -1,7 +1,10 @@
 package com.yf.wayfarer.web;
 
 import com.yf.wayfarer.agent.Agent;
+import com.yf.wayfarer.agent.modelchain.MemoryCompactConfig;
+import com.yf.wayfarer.agent.toolchain.PlanTools;
 import com.yf.wayfarer.agent.toolchain.UnloadTools;
+import com.yf.wayfarer.config.ConfigStore;
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ModelConfig;
@@ -24,7 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * agent 运行服务。
  *
  * @author yyf
- * @description 把请求参数装配成上下文，注入会话 id 与系统提示词后交给 agent 流式运行，
+ * @description 每次运行都先读取模型配置与记忆压缩配置，把请求参数装配成上下文后交给 agent 流式运行，
  * 并按会话 id 维护运行中的订阅以支持中途终止
  */
 @Service
@@ -33,6 +36,8 @@ public class AgentService {
     private final Session session;
     private final UnloadedMessageStore unloadedStore;
     private final SystemPromptStore promptStore;
+    private final ConfigStore<ModelConfig> modelConfigStore;
+    private final ConfigStore<MemoryCompactConfig> compactConfigStore;
     private final String apiKey;
     private final String baseUrl;
     private final String model;
@@ -40,25 +45,28 @@ public class AgentService {
     private final Long maxTokens;
     private final Integer maxTurns;
     private final String defaultAgentName;
-    private final int contextWindow;
     private final ConcurrentHashMap<String, Subscription> running = new ConcurrentHashMap<>();
 
-    private volatile Agent agent;
+    private volatile OpenAIChatModel chatModel;
+    private volatile ModelConfig chatModelConfig;
 
     public AgentService(Session session,
                         UnloadedMessageStore unloadedStore,
                         SystemPromptStore promptStore,
+                        ConfigStore<ModelConfig> modelConfigStore,
+                        ConfigStore<MemoryCompactConfig> compactConfigStore,
                         @Value("${wayfarer.model.api-key:}") String apiKey,
                         @Value("${wayfarer.model.base-url:https://api.deepseek.com}") String baseUrl,
                         @Value("${wayfarer.model.name:deepseek-flash}") String model,
                         @Value("${wayfarer.model.temperature:#{null}}") Double temperature,
                         @Value("${wayfarer.model.max-tokens:#{null}}") Long maxTokens,
                         @Value("${wayfarer.agent.max-turns:#{null}}") Integer maxTurns,
-                        @Value("${wayfarer.agent.name:wayfarer}") String defaultAgentName,
-                        @Value("${wayfarer.agent.context-window:128000}") int contextWindow) {
+                        @Value("${wayfarer.agent.name:wayfarer}") String defaultAgentName) {
         this.session = session;
         this.unloadedStore = unloadedStore;
         this.promptStore = promptStore;
+        this.modelConfigStore = modelConfigStore;
+        this.compactConfigStore = compactConfigStore;
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
         this.model = model;
@@ -66,7 +74,6 @@ public class AgentService {
         this.maxTokens = maxTokens;
         this.maxTurns = maxTurns;
         this.defaultAgentName = defaultAgentName;
-        this.contextWindow = contextWindow;
     }
 
     /**
@@ -97,7 +104,7 @@ public class AgentService {
             context.put(AgentContext.SYSTEM_PROMPT, systemPrompt);
         }
 
-        return agent().stream(context)
+        return buildAgent().stream(context)
                 .doOnSubscribe(subscription -> running.put(sessionId, subscription))
                 .doFinally(signal -> running.remove(sessionId));
     }
@@ -119,26 +126,46 @@ public class AgentService {
     }
 
     /**
-     * 首次使用时才创建 agent，未配置密钥时不影响其他接口。
+     * 每次构建都重新读取配置：优先使用启用的配置文件，没有时回退到 yml 中的取值。
      */
-    private Agent agent() {
-        Agent current = agent;
-        if (current == null) {
-            synchronized (this) {
-                if (agent == null) {
-                    if (apiKey == null || apiKey.isBlank()) {
-                        throw new IllegalStateException("未配置 wayfarer.model.api-key");
-                    }
-                    ModelConfig config = new ModelConfig(apiKey, baseUrl, model, temperature, maxTokens);
-                    ToolCall toolCall = new ToolCall();
-                    List<ToolDefinition> tools = toolCall.parse(new UnloadTools(unloadedStore));
-                    agent = new Agent(new OpenAIChatModel(config), tools, toolCall, maxTurns,
-                            session, unloadedStore, contextWindow);
-                }
-                current = agent;
-            }
+    private Agent buildAgent() {
+        ToolCall toolCall = new ToolCall();
+        List<ToolDefinition> tools = toolCall.parse(new UnloadTools(unloadedStore), new PlanTools());
+        return new Agent(chatModel(modelConfig()), tools, toolCall, maxTurns,
+                session, unloadedStore, compactConfig());
+    }
+
+    private ModelConfig modelConfig() {
+        ModelConfig config = modelConfigStore.first(ModelConfig::enabled);
+        if (config != null) {
+            return config;
         }
-        return current;
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalStateException("未配置模型：请在 modelconfig 目录启用一个配置，或配置 wayfarer.model.api-key");
+        }
+        return new ModelConfig(apiKey, baseUrl, model, temperature, maxTokens);
+    }
+
+    private MemoryCompactConfig compactConfig() {
+        MemoryCompactConfig config = compactConfigStore.first(MemoryCompactConfig::enabled);
+        return config == null ? MemoryCompactConfig.defaults() : config;
+    }
+
+    /**
+     * 模型客户端按配置复用，配置变化时重建，避免每次运行都新建连接池。
+     */
+    private OpenAIChatModel chatModel(ModelConfig config) {
+        OpenAIChatModel current = chatModel;
+        if (current != null && config.equals(chatModelConfig)) {
+            return current;
+        }
+        synchronized (this) {
+            if (chatModel == null || !config.equals(chatModelConfig)) {
+                chatModel = new OpenAIChatModel(config);
+                chatModelConfig = config;
+            }
+            return chatModel;
+        }
     }
 
     private static String text(Object value) {

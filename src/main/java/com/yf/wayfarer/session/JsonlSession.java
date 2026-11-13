@@ -92,7 +92,7 @@ public final class JsonlSession implements Session {
         Map<String, Object> source = new LinkedHashMap<>(message);
         SessionMessage normalized = new SessionMessage(
                 String.valueOf(source.getOrDefault("messageId", UUID.randomUUID().toString())),
-                source.get("turnId") == null ? null : String.valueOf(source.get("turnId")),
+                source.get("traceId") == null ? null : String.valueOf(source.get("traceId")),
                 JSONMsgType.valueOf(String.valueOf(source.getOrDefault("type", JSONMsgType.CUSTOM.name()))),
                 cast(source.get("content")));
         write(file, normalized);
@@ -114,10 +114,10 @@ public final class JsonlSession implements Session {
     }
 
     @Override
-    public synchronized void reset(String sessionId, String turnId) {
+    public synchronized void reset(String sessionId, String traceId) {
         Path file = resolve(sessionId);
         List<String> lines = readLines(file);
-        int cut = cutAt(parse(lines), turnId);
+        int cut = cutAt(parse(lines), traceId);
         try {
             Files.writeString(file, joinLines(lines.subList(0, cut)), StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
@@ -127,10 +127,10 @@ public final class JsonlSession implements Session {
     }
 
     @Override
-    public String fork(String sessionId, String turnId) {
+    public String fork(String sessionId, String traceId) {
         Path file = resolve(sessionId);
         List<String> lines = readLines(file);
-        int cut = cutAt(parse(lines), turnId);
+        int cut = cutAt(parse(lines), traceId);
         String newName = meta(sessionId).name() + "-fork";
         return copy(newName, lines.subList(0, cut));
     }
@@ -147,11 +147,11 @@ public final class JsonlSession implements Session {
         }
         List<SessionMessage> all = parse(readLines(file));
         int count = 0;
-        String lastTurnId = null;
+        String lastTraceId = null;
         for (int i = all.size() - 1; i >= 0; i--) {
             SessionMessage message = all.get(i);
-            if (lastTurnId == null) {
-                lastTurnId = message.turnId();
+            if (lastTraceId == null) {
+                lastTraceId = message.traceId();
             }
             if (message.type() == JSONMsgType.COMPACT) {
                 break;
@@ -172,7 +172,7 @@ public final class JsonlSession implements Session {
         }
         Map<String, Object> content = new LinkedHashMap<>();
         content.put("messages", snapshot);
-        write(file, new SessionMessage(UUID.randomUUID().toString(), lastTurnId, JSONMsgType.COMPACT, content));
+        write(file, new SessionMessage(UUID.randomUUID().toString(), lastTraceId, JSONMsgType.COMPACT, content));
     }
 
     private String copy(String newName, List<String> lines) {
@@ -237,15 +237,15 @@ public final class JsonlSession implements Session {
     }
 
     /**
-     * 找该轮次第一条消息的位置，轮次不存在时报错。
+     * 找该 trace 第一条消息的位置，trace 不存在时报错。
      */
-    private static int cutAt(List<SessionMessage> messages, String turnId) {
+    private static int cutAt(List<SessionMessage> messages, String traceId) {
         for (int i = 0; i < messages.size(); i++) {
-            if (turnId.equals(messages.get(i).turnId())) {
+            if (traceId.equals(messages.get(i).traceId())) {
                 return i;
             }
         }
-        throw new IllegalArgumentException("会话中不存在轮次：" + turnId);
+        throw new IllegalArgumentException("会话中不存在 traceId：" + traceId);
     }
 
     /**

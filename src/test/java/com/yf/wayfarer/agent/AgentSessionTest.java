@@ -2,6 +2,7 @@ package com.yf.wayfarer.agent;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import com.yf.wayfarer.agent.modelchain.MemoryCompactConfig;
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ChatMessage;
@@ -99,7 +100,7 @@ class AgentSessionTest {
         List<AgentMessage> messages = agent().stream(context).collectList().block();
         assertNotNull(messages);
         assertTrue(messages.size() >= 1);
-        assertNotNull(context.turnId());
+        assertNotNull(context.traceId());
 
         // 模型请求应包含会话中的用户消息
         assertTrue(requestBody.get().contains("查一下错误日志"), "请求体应包含历史用户消息：" + requestBody.get());
@@ -109,9 +110,32 @@ class AgentSessionTest {
         assertEquals(JSONMsgType.USER, stored.get(0).type());
         assertEquals(JSONMsgType.ASSISTANT, stored.get(1).type());
         assertEquals("处理完成", stored.get(1).content().get("content"));
-        assertEquals(context.turnId(), stored.get(1).turnId(), "助手消息应记录本轮轮次 id");
+        assertEquals(context.traceId(), stored.get(1).traceId(), "助手消息应记录本次运行的 trace id");
         assertEquals(JSONMsgType.CUSTOM, stored.get(2).type());
         assertEquals("cursor-1", stored.get(2).content().get("store:cursor"));
+    }
+
+    @Test
+    void 用户请求与计划状态随运行落盘() {
+        String sessionId = session.create("用户请求会话");
+        AgentContext context = new AgentContext();
+        context.put(AgentContext.SESSION_ID, sessionId);
+        context.put(AgentContext.USER_QUERY, "帮我排查重启问题");
+        context.put(AgentContext.PLAN, Map.of("1", Map.of("content", "读取日志", "status", "not_begin")));
+
+        agent().stream(context).collectList().block();
+
+        List<SessionMessage> stored = session.messages(sessionId);
+        assertEquals(3, stored.size(), "应依次写入用户请求、助手回复与状态三条消息");
+        assertEquals(JSONMsgType.USER, stored.get(0).type());
+        assertEquals("帮我排查重启问题", stored.get(0).content().get("content"));
+        assertEquals(JSONMsgType.ASSISTANT, stored.get(1).type());
+        assertEquals(JSONMsgType.CUSTOM, stored.get(2).type());
+        assertTrue(stored.get(2).content().containsKey(AgentContext.PLAN), "计划状态应写入自定义状态");
+
+        AgentContext restored = new AgentContext();
+        session.restore(sessionId, restored);
+        assertTrue(restored.get(AgentContext.PLAN) instanceof Map, "恢复后计划状态应回到上下文");
     }
 
     @Test
@@ -161,7 +185,7 @@ class AgentSessionTest {
 
     private Agent agent() {
         return new Agent(model, List.of(), new ToolCall(), null, session,
-                new UnloadedMessageStore(root.resolve("unloaded")), 128_000);
+                new UnloadedMessageStore(root.resolve("unloaded")), MemoryCompactConfig.defaults());
     }
 
     private static Map<String, Object> userContent(String text) {

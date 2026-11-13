@@ -1,22 +1,16 @@
 package com.yf.wayfarer.agent;
 
-import com.yf.wayfarer.agent.modelchain.MemoryCompressHandler;
-import com.yf.wayfarer.agent.modelchain.MemoryManageHandler;
-import com.yf.wayfarer.agent.modelchain.ModelHandler;
+import com.yf.wayfarer.agent.modelchain.*;
 import com.yf.wayfarer.agent.toolchain.ToolCallHandler;
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.loop.Chain;
 import com.yf.wayfarer.loop.Loop;
 import com.yf.wayfarer.message.AgentMessage;
-import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.ChatModel;
-import com.yf.wayfarer.model.ModelResponse;
 import com.yf.wayfarer.session.JSONMsgType;
 import com.yf.wayfarer.session.Session;
-import com.yf.wayfarer.session.SessionMessage;
 import com.yf.wayfarer.session.UnloadedMessageStore;
 import com.yf.wayfarer.toolcall.ToolCall;
-import com.yf.wayfarer.toolcall.ToolCallInfo;
 import com.yf.wayfarer.toolcall.ToolDefinition;
 import reactor.core.publisher.Flux;
 
@@ -29,7 +23,8 @@ import java.util.UUID;
  * agent 门面。
  *
  * @author yyf
- * @description 组装模型链与工具链，按会话运行循环，运行过程中把消息与状态写入会话文件
+ * @description 组装模型链与工具链，按会话运行循环；用户请求与对话消息由链路中的处理器写入会话，
+ * 可持久化状态在运行结束后统一落盘
  */
 public class Agent extends Loop {
 
@@ -37,16 +32,20 @@ public class Agent extends Loop {
 
     /**
      * @param unloadedStore 卸载消息存储，压缩时把大消息正文搬入其中
-     * @param contextWindow 上下文窗口 token 数，决定压缩阈值
+     * @param compact       记忆压缩配置，决定压缩阈值
      */
     public Agent(ChatModel model, List<ToolDefinition> tools, ToolCall toolCall,
                  Integer maxTurns, Session session, UnloadedMessageStore unloadedStore,
-                 int contextWindow) {
-        super(Chain.of(new MemoryCompressHandler(model, unloadedStore, contextWindow,
-                                0.7, 0.01, 0.02, 0.5, 100),
+                 MemoryCompactConfig compact) {
+        super(Chain.of(
+                        // 模型链：用户请求落盘 → 记忆压缩 → 步骤持久化 → 模型调用 → 记忆回写
+                        new UserQueryPersistHandler(),
+                        new MemoryCompressHandler(model, unloadedStore, compact),
+                        new AssistantAndToolCallPersistHandler(),
                         new ModelHandler(model, tools),
                         new MemoryManageHandler()),
-                Chain.of(new ToolCallHandler(toolCall)), maxTurns);
+                // 工具链：步骤持久化包裹工具执行，负责工具结果落盘
+                Chain.of(new AssistantAndToolCallPersistHandler(), new ToolCallHandler(toolCall)), maxTurns);
         this.session = session;
     }
 
@@ -59,50 +58,30 @@ public class Agent extends Loop {
             throw new IllegalArgumentException("上下文缺少会话 id");
         }
         session.restore(sessionId, context);
-        // 调用方可通过上下文预置轮次 id，使本轮问答归入同一轮次
-        String provided = context.turnId();
-        String turnId = provided == null || provided.isBlank()
+        context.put(AgentContext.SESSION, session);
+        // 调用方可通过上下文预置 trace id，使本轮问答归入同一次运行
+        String provided = context.traceId();
+        String traceId = provided == null || provided.isBlank()
                 ? UUID.randomUUID().toString()
                 : provided;
-        context.put(AgentContext.TURN_ID, turnId);
+        context.put(AgentContext.TRACE_ID, traceId);
 
         return run(context)
-                .doOnNext(message -> persistMessage(context, sessionId, message, turnId))
                 // 循环正常结束后先持久化状态再完成，保证下游拿到完成信号时文件已落盘
                 .concatWith(Flux.defer(() -> {
-                    persistStoreState(context, sessionId, turnId);
+                    persistStoreState(context, sessionId, traceId);
                     return Flux.empty();
                 }));
     }
 
     /**
-     * 把收尾消息对应的助手回复与工具结果按轮次写入会话文件。
-     */
-    private void persistMessage(AgentContext context, String sessionId, AgentMessage message, String turnId) {
-        if (message instanceof AgentMessage.End) {
-            ModelResponse response = context.modelResponse();
-            if (response == null) {
-                return;
-            }
-            List<ToolCallInfo> toolCalls = response.toolCalls();
-            // DeepSeek V4 思考模式：含工具调用时才回传 reasoning_content
-            String reasoning = toolCalls.isEmpty() ? null : response.reasoningContent();
-            ChatMessage assistant = ChatMessage.assistant(response.content(), reasoning, toolCalls);
-            session.append(sessionId, JSONMsgType.ASSISTANT, turnId, SessionMessage.toMap(assistant));
-        } else if (message instanceof AgentMessage.ToolResult result) {
-            ChatMessage tool = new ChatMessage(ChatMessage.Role.TOOL, result.content(), result.toolCallId());
-            session.append(sessionId, JSONMsgType.TOOL, turnId, SessionMessage.toMap(tool));
-        }
-    }
-
-    /**
      * 循环结束后把上下文中的可持久化状态写入一条 CUSTOM 消息。
      */
-    private void persistStoreState(AgentContext context, String sessionId, String turnId) {
+    private void persistStoreState(AgentContext context, String sessionId, String traceId) {
         Map<String, Object> store = new LinkedHashMap<>(context.storeState());
         if (store.isEmpty()) {
             return;
         }
-        session.append(sessionId, JSONMsgType.CUSTOM, turnId, store);
+        session.append(sessionId, JSONMsgType.CUSTOM, traceId, store);
     }
 }

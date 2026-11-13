@@ -45,7 +45,7 @@ class JsonlSessionTest {
         // 文件实际写入了合法 json 行，messageId 自动生成
         SessionMessage stored = session.messages(id).get(0);
         assertEquals(JSONMsgType.USER, stored.type());
-        assertEquals("turn-1", stored.turnId());
+        assertEquals("turn-1", stored.traceId());
         assertEquals("查一下日志", stored.content().get("content"));
         assertTrue(stored.messageId() != null && !stored.messageId().isBlank());
     }

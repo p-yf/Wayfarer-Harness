@@ -1,31 +1,25 @@
 package com.yf.wayfarer.model;
 
+import java.util.Locale;
+import java.util.Set;
+
 /**
- * 模型配置，仅保留必要参数。
+ * 模型配置。
  *
  * @author yyf
- * @description 承载 apiKey、服务地址、模型名与采样参数（temperature、max_tokens）
+ * @description 承载 apiKey、服务地址、模型名、采样参数与思考强度，并标记该配置是否启用
  */
-public final class ModelConfig {
+public record ModelConfig(String apiKey, String baseUrl, String model, Double temperature,
+                          Long maxTokens, String reasoningEffort, boolean enabled) {
 
     public static final String DEFAULT_BASE_URL = "https://api.deepseek.com";
     public static final String DEFAULT_MODEL = "deepseek-flash";
+    public static final String DEFAULT_REASONING_EFFORT = "high";
 
-    private final String apiKey;
-    private final String baseUrl;
-    private final String model;
-    private final Double temperature;
-    private final Long maxTokens;
+    private static final Set<String> EFFORTS = Set.of("none", "low", "high", "max");
 
-    public ModelConfig(String apiKey, String model) {
-        this(apiKey, DEFAULT_BASE_URL, model, null, null);
-    }
-
-    public ModelConfig(String apiKey, String model, Double temperature, Long maxTokens) {
-        this(apiKey, DEFAULT_BASE_URL, model, temperature, maxTokens);
-    }
-
-    public ModelConfig(String apiKey, String baseUrl, String model, Double temperature, Long maxTokens) {
+    public ModelConfig(String apiKey, String baseUrl, String model, Double temperature,
+                       Long maxTokens, String reasoningEffort, boolean enabled) {
         if (apiKey == null || apiKey.isBlank()) {
             throw new IllegalArgumentException("apiKey 不能为空");
         }
@@ -43,25 +37,38 @@ public final class ModelConfig {
         this.model = model;
         this.temperature = temperature;
         this.maxTokens = maxTokens;
+        this.reasoningEffort = normalizeEffort(reasoningEffort);
+        this.enabled = enabled;
     }
 
-    public String apiKey() {
-        return apiKey;
+    public ModelConfig(String apiKey, String model) {
+        this(apiKey, DEFAULT_BASE_URL, model, null, null);
     }
 
-    public String baseUrl() {
-        return baseUrl;
+    public ModelConfig(String apiKey, String model, Double temperature, Long maxTokens) {
+        this(apiKey, DEFAULT_BASE_URL, model, temperature, maxTokens);
     }
 
-    public String model() {
-        return model;
+    public ModelConfig(String apiKey, String baseUrl, String model, Double temperature, Long maxTokens) {
+        this(apiKey, baseUrl, model, temperature, maxTokens, DEFAULT_REASONING_EFFORT, true);
     }
 
-    public Double temperature() {
-        return temperature;
-    }
-
-    public Long maxTokens() {
-        return maxTokens;
+    /**
+     * 思考强度归一化：未配置时默认 high，minimal 视为 low，medium 与 xhigh 视为 high。
+     */
+    private static String normalizeEffort(String effort) {
+        if (effort == null || effort.isBlank()) {
+            return DEFAULT_REASONING_EFFORT;
+        }
+        String normalized = effort.trim().toLowerCase(Locale.ROOT);
+        normalized = switch (normalized) {
+            case "minimal" -> "low";
+            case "medium", "xhigh" -> "high";
+            default -> normalized;
+        };
+        if (!EFFORTS.contains(normalized)) {
+            throw new IllegalArgumentException("reasoningEffort 只能是 none、low、high、max：" + effort);
+        }
+        return normalized;
     }
 }

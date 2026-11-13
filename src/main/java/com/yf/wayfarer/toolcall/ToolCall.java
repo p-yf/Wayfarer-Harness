@@ -151,6 +151,9 @@ public final class ToolCall {
         if (List.class.isAssignableFrom(type)) {
             return "array";
         }
+        if (Map.class.isAssignableFrom(type)) {
+            return "object";
+        }
         return "string";
     }
 

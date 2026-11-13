@@ -75,7 +75,7 @@ public class Loop {
                         if (sink.isCancelled()) {
                             break;
                         }
-                        sink.next(new AgentMessage.ToolCall(info));
+                        sink.next(new AgentMessage.ToolCall(context.traceId(), info));
                     }
                     if (sink.isCancelled()) {
                         break;

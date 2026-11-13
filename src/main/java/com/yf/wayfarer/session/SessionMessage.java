@@ -12,9 +12,9 @@ import java.util.Map;
  * 会话文件中的一行消息。
  *
  * @author yyf
- * @description 保存消息 id、所属轮次 id、消息类型与 JSON 内容，并提供与 ChatMessage 的互转
+ * @description 保存消息 id、所属 trace id、消息类型与 JSON 内容，并提供与 ChatMessage 的互转
  */
-public record SessionMessage(String messageId, String turnId, JSONMsgType type, Map<String, Object> content) {
+public record SessionMessage(String messageId, String traceId, JSONMsgType type, Map<String, Object> content) {
 
     public SessionMessage {
         content = content == null ? Map.of() : content;

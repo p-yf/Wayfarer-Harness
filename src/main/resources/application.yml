@@ -15,10 +15,15 @@ wayfarer:
   # 系统提示词目录：文件名为 agent名称-提示词名称-顺序.md
   prompt:
     root: ./systemprompt
+  # 模型配置目录：每个 jsonl 文件一份配置，文件名即配置名称
+  model-config:
+    root: ./modelconfig
+  # 记忆压缩配置目录：每个 jsonl 文件一份配置，文件名即配置名称
+  memory-compact-config:
+    root: ./memorycompactconfig
   agent:
     name: wayfarer
-    max-turns: 10
-    context-window: 128000
+    max-turns:
   # 人工确认：等待工具确认的最长秒数，超时按未批准处理
   hitl:
     timeout-seconds: 300

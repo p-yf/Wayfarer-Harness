@@ -43,14 +43,14 @@ public class ModelHandler implements ChainHandler {
                         return;
                     }
                     if (!chunk.reasoningContent().isEmpty()) {
-                        sink.accept(new AgentMessage.Reasoning(chunk.reasoningContent()));
+                        sink.accept(new AgentMessage.Reasoning(context.traceId(), chunk.reasoningContent()));
                     }
                     if (!chunk.content().isEmpty()) {
-                        sink.accept(new AgentMessage.Text(chunk.content()));
+                        sink.accept(new AgentMessage.Text(context.traceId(), chunk.content()));
                     }
                     if (response != null) {
                         // 回复收尾：正文与思考已按增量送出，这里只给结束原因与用量
-                        sink.accept(new AgentMessage.End(response.finishReason(), response.usage()));
+                        sink.accept(new AgentMessage.End(context.traceId(), response.finishReason(), response.usage()));
                     }
                 })
                 .then(next);

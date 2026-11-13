@@ -39,9 +39,9 @@ public interface Session {
     /**
      * 向指定会话追加无消息 id 的消息，由实现补齐。
      */
-    default void append(String sessionId, JSONMsgType type, String turnId, Map<String, Object> content) {
+    default void append(String sessionId, JSONMsgType type, String traceId, Map<String, Object> content) {
         Map<String, Object> message = new LinkedHashMap<>();
-        message.put("turnId", turnId);
+        message.put("traceId", traceId);
         message.put("type", type.name());
         message.put("content", content);
         append(sessionId, message);
@@ -58,14 +58,14 @@ public interface Session {
     void delete(String sessionId);
 
     /**
-     * 删除指定会话中该轮次及其之后的全部消息。
+     * 删除指定会话中该 trace 及其之后的全部消息。
      */
-    void reset(String sessionId, String turnId);
+    void reset(String sessionId, String traceId);
 
     /**
-     * 把指定会话中该轮次之前的消息克隆到新会话，返回新会话 id。
+     * 把指定会话中该 trace 之前的消息克隆到新会话，返回新会话 id。
      */
-    String fork(String sessionId, String turnId);
+    String fork(String sessionId, String traceId);
 
     /**
      * 克隆指定会话的全部消息到新会话，返回新会话 id。
@@ -73,27 +73,27 @@ public interface Session {
     String clone(String sessionId);
 
     /**
-     * 按轮次滑动取历史：返回指定轮次之前（不含该轮）最近 turns 轮的对话消息。
-     * turnId 为空时取最近的 turns 轮。
+     * 按 trace 滑动取历史：返回指定 trace 之前（不含该 trace）最近 turns 轮的对话消息。
+     * traceId 为空时取最近的 turns 轮。
      */
-    default List<SessionMessage> historyBefore(String sessionId, String turnId, int turns) {
+    default List<SessionMessage> historyBefore(String sessionId, String traceId, int turns) {
         if (turns <= 0) {
             return List.of();
         }
         Map<String, List<SessionMessage>> grouped = new LinkedHashMap<>();
         for (SessionMessage message : messages(sessionId)) {
-            if (message.turnId() == null
+            if (message.traceId() == null
                     || message.type() == JSONMsgType.COMPACT
                     || message.type() == JSONMsgType.CUSTOM) {
                 continue;
             }
-            grouped.computeIfAbsent(message.turnId(), key -> new ArrayList<>()).add(message);
+            grouped.computeIfAbsent(message.traceId(), key -> new ArrayList<>()).add(message);
         }
 
         List<String> order = new ArrayList<>(grouped.keySet());
-        int end = turnId == null || turnId.isBlank() ? order.size() : order.indexOf(turnId);
+        int end = traceId == null || traceId.isBlank() ? order.size() : order.indexOf(traceId);
         if (end < 0) {
-            throw new IllegalArgumentException("会话中不存在轮次：" + turnId);
+            throw new IllegalArgumentException("会话中不存在 traceId：" + traceId);
         }
 
         List<SessionMessage> page = new ArrayList<>();

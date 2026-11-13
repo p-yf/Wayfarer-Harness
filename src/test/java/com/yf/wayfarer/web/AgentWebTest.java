@@ -82,6 +82,9 @@ class AgentWebTest {
         registry.add("wayfarer.session.root", SESSION_ROOT::toString);
         registry.add("wayfarer.unload.root", () -> SESSION_ROOT.resolve("unloaded").toString());
         registry.add("wayfarer.prompt.root", () -> SESSION_ROOT.resolve("prompt").toString());
+        registry.add("wayfarer.model-config.root", () -> SESSION_ROOT.resolve("modelconfig").toString());
+        registry.add("wayfarer.memory-compact-config.root",
+                () -> SESSION_ROOT.resolve("memorycompactconfig").toString());
         registry.add("wayfarer.agent.max-turns", () -> 1);
     }
 
@@ -133,7 +136,7 @@ class AgentWebTest {
 
         SessionMessage[] page = client.get()
                 .uri(uri -> uri.path("/api/sessions/{id}/history")
-                        .queryParam("turnId", "turn-5")
+                        .queryParam("traceId", "turn-5")
                         .queryParam("turns", 3)
                         .build(sessionId))
                 .exchange()
@@ -144,9 +147,9 @@ class AgentWebTest {
 
         assertTrue(page != null);
         assertEquals(6, page.length, "应返回第 2、3、4 轮共六条消息");
-        assertEquals("turn-2", page[0].turnId());
+        assertEquals("turn-2", page[0].traceId());
         assertEquals("问2", page[0].content().get("content"));
-        assertEquals("turn-4", page[5].turnId());
+        assertEquals("turn-4", page[5].traceId());
     }
 
     @Test
@@ -166,23 +169,23 @@ class AgentWebTest {
 
         assertTrue(page != null);
         assertEquals(3, page.length);
-        assertEquals("turn-3", page[0].turnId());
+        assertEquals("turn-3", page[0].traceId());
     }
 
     @Test
     void 流式运行返回片段并写入会话文件() {
         String sessionId = session.create("流式会话");
 
-        // 先通过接口追加用户消息，轮次 id 由调用方指定
+        // 先通过接口追加用户消息，trace id 由调用方指定
         client.post().uri("/api/sessions/{id}/messages", sessionId)
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(Map.of("turnId", "turn-web", "content", userContent("查日志")))
+                .bodyValue(Map.of("traceId", "turn-web", "content", userContent("查日志")))
                 .exchange()
                 .expectStatus().isOk();
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("sessionId", sessionId);
-        payload.put("turnId", "turn-web");
+        payload.put("traceId", "turn-web");
         payload.put("store:cursor", "cursor-9");
 
         List<String> events = client.post().uri("/api/agent/stream")
@@ -202,9 +205,9 @@ class AgentWebTest {
 
         List<SessionMessage> stored = session.messages(sessionId);
         assertEquals(3, stored.size());
-        assertEquals("turn-web", stored.get(0).turnId());
+        assertEquals("turn-web", stored.get(0).traceId());
         assertEquals(JSONMsgType.ASSISTANT, stored.get(1).type());
-        assertEquals("turn-web", stored.get(1).turnId(), "助手消息应沿用调用方指定的轮次 id");
+        assertEquals("turn-web", stored.get(1).traceId(), "助手消息应沿用调用方指定的 trace id");
         assertEquals("cursor-9", stored.get(2).content().get("store:cursor"));
     }
 
@@ -308,7 +311,7 @@ class AgentWebTest {
     void 缺少会话id时返回错误() {
         client.post().uri("/api/agent/stream")
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(Map.of("turnId", "t1"))
+                .bodyValue(Map.of("traceId", "t1"))
                 .exchange()
                 .expectStatus().isBadRequest();
     }

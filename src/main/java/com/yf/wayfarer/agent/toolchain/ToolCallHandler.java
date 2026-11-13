@@ -48,7 +48,7 @@ public class ToolCallHandler implements ChainHandler {
             String content = result == null ? "" : String.valueOf(result);
             Consumer<AgentMessage> sink = context.agentMsgSink();
             if (sink != null) {
-                sink.accept(new AgentMessage.ToolResult(info.id(), content));
+                sink.accept(new AgentMessage.ToolResult(context.traceId(), info.id(), content));
             }
             context.messages().add(new ChatMessage(ChatMessage.Role.TOOL, content, info.id()));
         });

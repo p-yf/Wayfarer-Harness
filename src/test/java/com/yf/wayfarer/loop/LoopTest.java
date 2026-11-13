@@ -51,6 +51,7 @@ class LoopTest {
         AtomicInteger modelRuns = new AtomicInteger();
         AtomicInteger toolRuns = new AtomicInteger();
         AgentContext context = new AgentContext();
+        context.put(AgentContext.TRACE_ID, "trace-1");
         ToolCallInfo call = new ToolCallInfo("call_1", "getWeather", "{\"city\":\"北京\"}");
 
         Chain modelChain = Chain.of(
@@ -59,10 +60,10 @@ class LoopTest {
                         .doOnSuccess(ignored -> trace.add("model-after")),
                 (ctx, next) -> Mono.fromRunnable(() -> {
                     if (modelRuns.incrementAndGet() == 1) {
-                        ctx.agentMsgSink().accept(new AgentMessage.Text("查天气"));
+                        ctx.agentMsgSink().accept(new AgentMessage.Text("trace-1", "查天气"));
                         ctx.put(AgentContext.MODEL_RESPONSE, responseWithToolCall());
                     } else {
-                        ctx.agentMsgSink().accept(new AgentMessage.Text("北京晴"));
+                        ctx.agentMsgSink().accept(new AgentMessage.Text("trace-1", "北京晴"));
                         ctx.put(AgentContext.MODEL_RESPONSE, responseWithoutToolCall());
                     }
                 }));
@@ -73,14 +74,14 @@ class LoopTest {
                         .doOnSuccess(ignored -> trace.add("tool-after")),
                 (ctx, next) -> Mono.fromRunnable(() -> {
                     toolRuns.incrementAndGet();
-                    ctx.agentMsgSink().accept(new AgentMessage.ToolResult("call_1", "晴，25度"));
+                    ctx.agentMsgSink().accept(new AgentMessage.ToolResult("trace-1", "call_1", "晴，25度"));
                 }));
 
         StepVerifier.create(new Loop(modelChain, toolChain).run(context))
-                .expectNext(new AgentMessage.Text("查天气"))
-                .expectNext(new AgentMessage.ToolCall(call))
-                .expectNext(new AgentMessage.ToolResult("call_1", "晴，25度"))
-                .expectNext(new AgentMessage.Text("北京晴"))
+                .expectNext(new AgentMessage.Text("trace-1", "查天气"))
+                .expectNext(new AgentMessage.ToolCall("trace-1", call))
+                .expectNext(new AgentMessage.ToolResult("trace-1", "call_1", "晴，25度"))
+                .expectNext(new AgentMessage.Text("trace-1", "北京晴"))
                 .verifyComplete();
 
         assertEquals(2, modelRuns.get());

@@ -37,42 +37,18 @@ public class MemoryCompressHandler implements ChainHandler {
 
     private final ChatModel model;
     private final UnloadedMessageStore store;
-    private final int contextWindow;
-    private final double triggerRatio;
-    private final double toolRatio;
-    private final double messageRatio;
-    private final double compressRatio;
-    private final int keepChars;
+    private final MemoryCompactConfig compact;
 
     /**
-     * @param contextWindow  上下文窗口 token 数
-     * @param triggerRatio   触发压缩的比例，例如 0.7
-     * @param toolRatio      单条工具结果超过该比例即卸载，例如 0.01
-     * @param messageRatio   单条普通消息超过该比例即卸载，例如 0.02
-     * @param compressRatio  头部累计超过该比例即交给模型压缩，例如 0.5
-     * @param keepChars      卸载普通消息时头尾各保留的字符数
+     * @param compact 记忆压缩配置，包含上下文窗口与各级阈值
      */
-    public MemoryCompressHandler(ChatModel model, UnloadedMessageStore store, int contextWindow,
-                                 double triggerRatio, double toolRatio, double messageRatio,
-                                 double compressRatio, int keepChars) {
-        if (contextWindow <= 0) {
-            throw new IllegalArgumentException("contextWindow 必须大于 0");
-        }
-        requireRatio(triggerRatio, "triggerRatio");
-        requireRatio(toolRatio, "toolRatio");
-        requireRatio(messageRatio, "messageRatio");
-        requireRatio(compressRatio, "compressRatio");
-        if (keepChars < 0) {
-            throw new IllegalArgumentException("keepChars 不能为负数");
+    public MemoryCompressHandler(ChatModel model, UnloadedMessageStore store, MemoryCompactConfig compact) {
+        if (compact == null) {
+            throw new IllegalArgumentException("记忆压缩配置不能为空");
         }
         this.model = model;
         this.store = store;
-        this.contextWindow = contextWindow;
-        this.triggerRatio = triggerRatio;
-        this.toolRatio = toolRatio;
-        this.messageRatio = messageRatio;
-        this.compressRatio = compressRatio;
-        this.keepChars = keepChars;
+        this.compact = compact;
     }
 
     @Override
@@ -94,7 +70,7 @@ public class MemoryCompressHandler implements ChainHandler {
         if (messages == null || messages.isEmpty()) {
             return;
         }
-        if (estimate(messages) <= tokens(triggerRatio)) {
+        if (estimate(messages) <= tokens(compact.triggerRatio())) {
             return;
         }
 
@@ -108,7 +84,7 @@ public class MemoryCompressHandler implements ChainHandler {
         // 历史压完仍然超阈值，则对本轮执行同样的三级流程
         List<ChatMessage> result = new ArrayList<>(history);
         result.addAll(current);
-        if (estimate(result) > tokens(triggerRatio)) {
+        if (estimate(result) > tokens(compact.triggerRatio())) {
             compressRange(current, context);
             result = new ArrayList<>(history);
             result.addAll(current);
@@ -132,7 +108,7 @@ public class MemoryCompressHandler implements ChainHandler {
             return;
         }
         // LLM 压缩是破坏性的，仅当该区间自身确实超限时才执行
-        if (estimate(range) > tokens(triggerRatio)) {
+        if (estimate(range) > tokens(compact.triggerRatio())) {
             compressHead(range, context);
         }
     }
@@ -145,7 +121,7 @@ public class MemoryCompressHandler implements ChainHandler {
         for (int i = 0; i < range.size(); i++) {
             ChatMessage message = range.get(i);
             if (message.role() != ChatMessage.Role.TOOL
-                    || estimate(message.content()) <= tokens(toolRatio)) {
+                    || estimate(message.content()) <= tokens(compact.toolRatio())) {
                 continue;
             }
             range.set(i, withContent(message, unload(message.content(), context)));
@@ -159,10 +135,11 @@ public class MemoryCompressHandler implements ChainHandler {
      */
     private boolean unloadMessages(List<ChatMessage> range, AgentContext context) {
         boolean changed = false;
+        int keepChars = compact.keepChars();
         for (int i = 0; i < range.size(); i++) {
             ChatMessage message = range.get(i);
             if (message.role() == ChatMessage.Role.TOOL
-                    || estimate(message.content()) <= tokens(messageRatio)) {
+                    || estimate(message.content()) <= tokens(compact.messageRatio())) {
                 continue;
             }
             String content = message.content();
@@ -182,7 +159,7 @@ public class MemoryCompressHandler implements ChainHandler {
      * 若到区间末尾仍未超过阈值，则压缩整个区间，视为压缩失败（不够彻底）。
      */
     private void compressHead(List<ChatMessage> range, AgentContext context) {
-        int budget = tokens(compressRatio);
+        int budget = tokens(compact.compressRatio());
         int accumulated = 0;
         int cut = 0;
         while (cut < range.size() && accumulated <= budget) {
@@ -278,7 +255,7 @@ public class MemoryCompressHandler implements ChainHandler {
     }
 
     private int tokens(double ratio) {
-        return (int) Math.floor(contextWindow * ratio);
+        return (int) Math.floor(compact.contextWindow() * ratio);
     }
 
     static int estimate(List<ChatMessage> messages) {
@@ -312,12 +289,6 @@ public class MemoryCompressHandler implements ChainHandler {
             }
         }
         return cjk + (int) Math.ceil((text.length() - cjk) / 4.0);
-    }
-
-    private static void requireRatio(double ratio, String label) {
-        if (ratio <= 0 || ratio > 1) {
-            throw new IllegalArgumentException(label + " 必须在 0 到 1 之间");
-        }
     }
 
     private static boolean isCjk(char ch) {

@@ -96,13 +96,16 @@ class AgentChainTest {
         Chain toolChain = Chain.of(new ToolCallHandler(toolCall));
 
         AgentContext context = new AgentContext();
+        context.put(AgentContext.TRACE_ID, "trace-1");
         context.put(AgentContext.MESSAGES, new ArrayList<>(List.of(
                 new ChatMessage(ChatMessage.Role.USER, "检查日志"))));
 
         StepVerifier.create(new Loop(modelChain, toolChain).run(context))
                 .expectNextMatches(msg -> msg instanceof AgentMessage.End end
+                        && "trace-1".equals(end.traceId())
                         && end.finishReason() == FinishReason.TOOL_CALLS)
                 .expectNextMatches(msg -> msg instanceof AgentMessage.ToolCall call
+                        && "trace-1".equals(call.traceId())
                         && "call_1".equals(call.call().id())
                         && "inspect_logs".equals(call.call().name()))
                 .expectNextMatches(msg -> msg instanceof AgentMessage.ToolResult result

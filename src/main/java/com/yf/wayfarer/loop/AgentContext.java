@@ -3,6 +3,7 @@ package com.yf.wayfarer.loop;
 import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.ModelResponse;
+import com.yf.wayfarer.session.Session;
 import com.yf.wayfarer.toolcall.ToolContext;
 
 import java.util.LinkedHashMap;
@@ -36,9 +37,9 @@ public final class AgentContext implements ToolContext {
     public static final String MESSAGES = "messages";
 
     /**
-     * 本轮运行的轮次 id，由 Agent 在运行前生成并写入。
+     * 本次运行的 trace id，由 Agent 在运行前生成并写入。
      */
-    public static final String TURN_ID = "turnId";
+    public static final String TRACE_ID = "traceId";
 
     /**
      * 当前轮次序号，从 1 开始，由 Loop 在每一轮开始时写入。
@@ -49,6 +50,16 @@ public final class AgentContext implements ToolContext {
      * 本次运行对应的会话 id，由调用方在运行前写入。
      */
     public static final String SESSION_ID = "sessionId";
+
+    /**
+     * 会话存储，由 Agent 在运行前写入，供链路内直接读写会话。
+     */
+    public static final String SESSION = "session";
+
+    /**
+     * 用户当前的请求，由调用方在运行前写入，运行开始时作为用户消息写入会话。
+     */
+    public static final String USER_QUERY = "userquery";
 
     /**
      * 拼接好的系统提示词，由调用方在运行前写入，模型调用时作为首条 system 消息。
@@ -74,6 +85,11 @@ public final class AgentContext implements ToolContext {
      * 可持久化状态的键前缀，会话结束时统一写入会话文件。
      */
     public static final String STORE_PREFIX = "store:";
+
+    /**
+     * 计划状态，值为序号到「内容、状态」的映射，随会话状态一起持久化。
+     */
+    public static final String PLAN = STORE_PREFIX + "plan";
 
     private final ConcurrentHashMap<String, Object> values = new ConcurrentHashMap<>();
 
@@ -121,6 +137,10 @@ public final class AgentContext implements ToolContext {
         return values.containsKey(key);
     }
 
+    public void remove(String key) {
+        values.remove(key);
+    }
+
     public ModelResponse modelResponse() {
         return get(MODEL_RESPONSE, ModelResponse.class);
     }
@@ -146,10 +166,10 @@ public final class AgentContext implements ToolContext {
     }
 
     /**
-     * 当前轮次 id，未进入运行时为 null。
+     * 本次运行的 trace id，未进入运行时为 null。
      */
-    public String turnId() {
-        return get(TURN_ID, String.class);
+    public String traceId() {
+        return get(TRACE_ID, String.class);
     }
 
     /**
@@ -157,6 +177,20 @@ public final class AgentContext implements ToolContext {
      */
     public String sessionId() {
         return get(SESSION_ID, String.class);
+    }
+
+    /**
+     * 会话存储，未进入运行时为 null。
+     */
+    public Session session() {
+        return get(SESSION, Session.class);
+    }
+
+    /**
+     * 用户当前的请求，未设置时为 null。
+     */
+    public String userQuery() {
+        return get(USER_QUERY, String.class);
     }
 
     /**

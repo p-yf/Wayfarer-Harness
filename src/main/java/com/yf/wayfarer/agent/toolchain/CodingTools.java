@@ -4,8 +4,13 @@ import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.toolcall.Tool;
 import com.yf.wayfarer.toolcall.ToolParam;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -70,9 +75,11 @@ public class CodingTools {
         }
     }
 
-    @Tool(name = "bash", description = "在当前工作区执行 shell 命令，返回合并后的标准输出与错误输出，输出超过限制时截断尾部")
+    @Tool(name = "bash", description = "在当前工作区执行命令并返回合并后的输出。Windows 上优先使用 Git Bash，"
+            + "支持 pwd、ls、head、grep 等 Unix 命令；未安装 Git Bash 时退回 cmd.exe，只能用 dir、type、copy 等，"
+            + "路径用反斜杠。Linux/macOS 上通过 bash 执行。命令已在工作区内，直接用相对路径即可")
     public String bash(AgentContext context,
-                       @ToolParam(description = "要执行的 shell 命令") String command,
+                       @ToolParam(description = "要执行的命令") String command,
                        @ToolParam(description = "超时秒数，可选，不传则不限制") Integer timeout) {
         if (command == null || command.isBlank()) {
             return "错误：缺少参数 command";
@@ -82,27 +89,14 @@ public class CodingTools {
             if (!Files.isDirectory(cwd)) {
                 return "错误：工作目录不存在：" + cwd;
             }
-            List<String> cmd = new ArrayList<>();
-            if (isWindows()) {
-                cmd.add("cmd.exe");
-                cmd.add("/d");
-                cmd.add("/s");
-                cmd.add("/c");
-                // 切到 utf-8 代码页，否则中文系统的报错文本会按 GBK 输出而被按 utf-8 解码成乱码
-                cmd.add("chcp 65001>nul & " + command);
-            } else {
-                cmd.add("/bin/bash");
-                cmd.add("-lc");
-                cmd.add(command);
-            }
-            Process process = new ProcessBuilder(cmd)
+            Process process = new ProcessBuilder(shellCommand(command))
                     .directory(cwd.toFile())
                     .redirectErrorStream(true)
                     .start();
             // 输出在独立线程读取，避免进程缓冲区写满后阻塞 waitFor
             CompletableFuture<String> output = CompletableFuture.supplyAsync(() -> {
                 try (InputStream in = process.getInputStream()) {
-                    return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+                    return decode(in.readAllBytes());
                 } catch (IOException e) {
                     return "";
                 }
@@ -116,7 +110,7 @@ public class CodingTools {
                 finished = true;
             }
             if (!finished) {
-                process.destroyForcibly();
+                killTree(process);
                 process.waitFor(5, TimeUnit.SECONDS);
             }
             String text = output.get(10, TimeUnit.SECONDS);
@@ -223,6 +217,91 @@ public class CodingTools {
 
     private static boolean isWindows() {
         return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+    }
+
+    /**
+     * 组装执行命令：Windows 优先用 Git Bash，Unix 命令与管道才能用；
+     * 找不到 Git Bash 时退回 cmd.exe，并切到 utf-8 代码页避免中文报错乱码。
+     */
+    private static List<String> shellCommand(String command) {
+        if (!isWindows()) {
+            return List.of("/bin/bash", "-lc", command);
+        }
+        Path bash = gitBash();
+        if (bash != null) {
+            return List.of(bash.toString(), "-c", command);
+        }
+        return List.of("cmd.exe", "/d", "/s", "/c", "chcp 65001>nul & " + command);
+    }
+
+    /**
+     * 定位 Git Bash。安装器的 bin 目录通常不在系统 PATH 里，
+     * 因此先从 PATH 上的 git.exe 反推安装目录，再检查常见安装位置。
+     */
+    private static Path gitBash() {
+        List<Path> candidates = new ArrayList<>();
+        String path = System.getenv("PATH");
+        if (path != null) {
+            for (String dir : path.split(File.pathSeparator)) {
+                if (dir.isBlank()) {
+                    continue;
+                }
+                Path git = Path.of(dir, "git.exe");
+                Path parent = git.getParent();
+                if (parent != null && parent.getParent() != null && Files.isRegularFile(git)) {
+                    candidates.add(parent.getParent().resolve("bin").resolve("bash.exe"));
+                }
+            }
+        }
+        candidates.add(Path.of(env("ProgramFiles", "C:\\Program Files"), "Git", "bin", "bash.exe"));
+        candidates.add(Path.of(env("ProgramFiles(x86)", ""), "Git", "bin", "bash.exe"));
+        candidates.add(Path.of(env("LOCALAPPDATA", ""), "Programs", "Git", "bin", "bash.exe"));
+        for (Path candidate : candidates) {
+            if (Files.isRegularFile(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static String env(String name, String fallback) {
+        String value = System.getenv(name);
+        return value == null || value.isBlank() ? fallback : value;
+    }
+
+    /**
+     * 超时终止整棵进程树。只销毁 shell 进程时，它派生的子进程会继续存活并占着输出管道。
+     */
+    private static void killTree(Process process) {
+        if (isWindows()) {
+            try {
+                new ProcessBuilder("taskkill", "/F", "/T", "/PID", String.valueOf(process.pid()))
+                        .redirectErrorStream(true)
+                        .start()
+                        .waitFor(5, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                // taskkill 不可用时退回直接销毁
+            }
+        }
+        process.destroyForcibly();
+    }
+
+    /**
+     * 命令输出优先按 utf-8 严格解码；中文 Windows 上部分程序仍按 GBK 输出，
+     * 严格解码失败时回退 GBK，避免中文报错文本变成乱码。
+     */
+    private static String decode(byte[] bytes) {
+        try {
+            return StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes))
+                    .toString();
+        } catch (CharacterCodingException e) {
+            return isWindows()
+                    ? new String(bytes, Charset.forName("GBK"))
+                    : new String(bytes, StandardCharsets.UTF_8);
+        }
     }
 
     private static String append(String content, String status) {

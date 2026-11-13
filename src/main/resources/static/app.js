@@ -336,6 +336,8 @@
     const blocks = [];
     const toolsById = {};
     const headTraces = new Set();
+    // 每轮助手消息中工具卡片在 blocks 中的起始下标，用于把调用记录插在文字之后、工具之前
+    const toolStart = {};
     for (const msg of messages || []) {
       const content = msg.content || {};
       if (msg.type === "USER") {
@@ -353,6 +355,7 @@
         if (content.content) {
           blocks.push({ kind: "text", content: content.content, traceId: msg.traceId });
         }
+        toolStart[msg.traceId] = blocks.length;
         for (const call of content.toolCalls || []) {
           const block = { kind: "tool", id: call.id, name: call.name, arguments: call.arguments, result: null, open: false, traceId: msg.traceId };
           toolsById[call.id] = block;
@@ -370,13 +373,21 @@
       } else if (msg.type === "COMPACT") {
         blocks.push({ kind: "compact" });
       } else if (msg.type === "EXTRADATA") {
-        blocks.push({
+        // 与实时流保持一致：调用记录紧跟本轮文字，排在该轮工具卡片之前
+        const end = {
           kind: "end",
           finishReason: content.finishReason,
           usage: content.usage,
           durationMs: content.durationMs,
           traceId: msg.traceId
-        });
+        };
+        const index = toolStart[msg.traceId];
+        if (typeof index === "number") {
+          blocks.splice(index, 0, end);
+        } else {
+          blocks.push(end);
+        }
+        delete toolStart[msg.traceId];
       }
     }
     return blocks;

@@ -58,7 +58,7 @@ class SseEventsTest {
     @Test
     void 收尾消息映射为messageEnd事件() {
         AgentMessage message = new AgentMessage.End("trace-1", FinishReason.STOP,
-                new Usage(10L, 20L, 30L, 5L, 5L));
+                new Usage(10L, 20L, 30L, 5L, 5L, 3L));
 
         ServerSentEvent<Object> event = single(message);
 

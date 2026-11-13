@@ -45,7 +45,8 @@ public record ChatMessage(Role role, String content, String toolCallId,
 
     /**
      * 构造 assistant 消息，用于把上一轮模型响应回放到消息历史。
-     * DeepSeek V4 思考模式要求含工具调用的 assistant 消息必须回传 reasoningContent。
+     * reasoningContent 是模型本轮的完整思考内容，作为记录随会话落盘；
+     * 是否回传给供应商由具体模型适配器决定。
      */
     public static ChatMessage assistant(String content, String reasoningContent, List<ToolCallInfo> toolCalls) {
         return new ChatMessage(Role.ASSISTANT, content, null, reasoningContent, toolCalls);

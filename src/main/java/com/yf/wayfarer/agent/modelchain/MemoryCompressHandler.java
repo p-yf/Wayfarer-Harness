@@ -2,15 +2,22 @@ package com.yf.wayfarer.agent.modelchain;
 
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.loop.ChainHandler;
+import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.ChatModel;
 import com.yf.wayfarer.model.ChatRequest;
+import com.yf.wayfarer.session.JSONMsgType;
+import com.yf.wayfarer.session.Session;
+import com.yf.wayfarer.session.SessionMessage;
 import com.yf.wayfarer.session.UnloadedMessageStore;
 import com.yf.wayfarer.toolcall.ToolCallInfo;
 import reactor.core.publisher.Mono;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -74,6 +81,7 @@ public class MemoryCompressHandler implements ChainHandler {
             return;
         }
 
+        List<ChatMessage> original = List.copyOf(messages);
         List<ChatMessage> all = new ArrayList<>(messages);
         int split = lastUserIndex(all);
         List<ChatMessage> history = new ArrayList<>(all.subList(0, split));
@@ -92,6 +100,44 @@ public class MemoryCompressHandler implements ChainHandler {
 
         messages.clear();
         messages.addAll(result);
+        if (!original.equals(result)) {
+            persistSnapshot(context, result);
+            notifyCompressed(context, result);
+        }
+    }
+
+    /**
+     * 压缩发生后推送一条 other 事件，让前端展示压缩时机与压缩后的上下文规模。
+     */
+    private void notifyCompressed(AgentContext context, List<ChatMessage> messages) {
+        Consumer<AgentMessage> sink = context.agentMsgSink();
+        if (sink == null) {
+            return;
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("type", "compact");
+        data.put("message", "上下文已压缩");
+        data.put("tokens", estimate(messages));
+        sink.accept(new AgentMessage.Other(context.traceId(), data));
+    }
+
+    /**
+     * 把压缩后的消息写成 COMPACT 快照。
+     * 不落盘的话压缩只在本轮内存里有效，下一轮恢复会话又会被完整历史覆盖回去，压缩等于没做。
+     */
+    private void persistSnapshot(AgentContext context, List<ChatMessage> messages) {
+        Session session = context.session();
+        String sessionId = context.sessionId();
+        if (session == null || sessionId == null) {
+            return;
+        }
+        List<Map<String, Object>> snapshot = new ArrayList<>(messages.size());
+        for (ChatMessage message : messages) {
+            snapshot.add(SessionMessage.toMap(message));
+        }
+        Map<String, Object> content = new LinkedHashMap<>();
+        content.put("messages", snapshot);
+        session.append(sessionId, JSONMsgType.COMPACT, context.traceId(), content);
     }
 
     /**
@@ -266,8 +312,15 @@ public class MemoryCompressHandler implements ChainHandler {
         return total;
     }
 
+    /**
+     * 估算单条消息占用的上下文 token。
+     * 思考内容只在含工具调用时才会回放给模型，纯文本轮次的思考不占上下文窗口，故不计入。
+     */
     private static int estimateMessage(ChatMessage message) {
-        int total = estimate(message.content()) + estimate(message.reasoningContent());
+        int total = estimate(message.content());
+        if (!message.toolCalls().isEmpty()) {
+            total += estimate(message.reasoningContent());
+        }
         for (ToolCallInfo info : message.toolCalls()) {
             total += estimate(info.name()) + estimate(info.arguments());
         }

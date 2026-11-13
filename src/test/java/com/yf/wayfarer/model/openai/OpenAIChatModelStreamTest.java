@@ -7,6 +7,7 @@ import com.yf.wayfarer.model.ChatRequest;
 import com.yf.wayfarer.model.FinishReason;
 import com.yf.wayfarer.model.ModelConfig;
 import com.yf.wayfarer.model.ModelResponse;
+import com.yf.wayfarer.model.Usage;
 import com.yf.wayfarer.toolcall.ToolCallInfo;
 import com.yf.wayfarer.toolcall.ToolDefinition;
 import org.junit.jupiter.api.AfterEach;
@@ -32,6 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -290,6 +292,30 @@ class OpenAIChatModelStreamTest {
     }
 
     @Test
+    void 纯文本轮次的思考内容不回传到请求体() {
+        serveSse("""
+                data: {"id":"1","object":"chat.completion.chunk","created":1,"model":"deepseek-flash","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}
+
+                data: [DONE]
+
+                """);
+
+        // 记忆层保留完整思考内容，但纯文本轮次不满足 DeepSeek 的回传条件
+        ChatRequest request = new ChatRequest(List.of(
+                new ChatMessage(ChatMessage.Role.USER, "上一轮问题"),
+                ChatMessage.assistant("上一轮回答", "上一轮的思考", List.of()),
+                new ChatMessage(ChatMessage.Role.USER, "本轮问题")));
+
+        StepVerifier.create(model.stream(request))
+                .expectNextCount(2)
+                .verifyComplete();
+
+        String body = requestBody.get();
+        assertTrue(body.contains("上一轮回答"), "正文仍需回放：" + body);
+        assertFalse(body.contains("reasoning_content"), "纯文本轮次不应回传思考内容：" + body);
+    }
+
+    @Test
     void 温度与最大token下发到请求体() {
         String sse = """
                 data: {"id":"1","object":"chat.completion.chunk","created":1,"model":"deepseek-flash","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}
@@ -412,6 +438,61 @@ class OpenAIChatModelStreamTest {
         assertNotNull(response);
         assertEquals("先想一想", response.reasoningContent());
         assertEquals("答案", response.content());
+    }
+
+    @Test
+    void 工具调用的id与名称不被后续空片段覆盖() {
+        // 多数 OpenAI 兼容网关只在首片给出 id 与 name，后续分片把二者传成空串
+        serveSse("""
+                data: {"id":"1","object":"chat.completion.chunk","created":1,"model":"deepseek-flash","choices":[{"index":0,"delta":{"tool_calls":[{"id":"call_1","type":"function","index":0,"function":{"name":"read_unloaded","arguments":""}}]},"finish_reason":null}]}
+
+                data: {"id":"1","object":"chat.completion.chunk","created":1,"model":"deepseek-flash","choices":[{"index":0,"delta":{"tool_calls":[{"id":"","type":"function","index":0,"function":{"name":"","arguments":"{\\"id\\": "}}]},"finish_reason":null}]}
+
+                data: {"id":"1","object":"chat.completion.chunk","created":1,"model":"deepseek-flash","choices":[{"index":0,"delta":{"tool_calls":[{"id":"","index":0,"function":{"name":"","arguments":"\\"abc\\"}"}}]},"finish_reason":null}]}
+
+                data: {"id":"1","object":"chat.completion.chunk","created":1,"model":"deepseek-flash","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+                data: [DONE]
+
+                """);
+
+        List<ChatChunk> chunks = model.stream(new ChatRequest(List.of(
+                new ChatMessage(ChatMessage.Role.USER, "读一下卸载内容")))).collectList().block();
+
+        assertNotNull(chunks);
+        ModelResponse response = chunks.get(chunks.size() - 1).response();
+        assertNotNull(response);
+        assertEquals(1, response.toolCalls().size());
+        assertEquals("call_1", response.toolCalls().get(0).id(), "id 不应被空串覆盖");
+        assertEquals("read_unloaded", response.toolCalls().get(0).name(), "工具名不应被空串覆盖");
+        assertEquals("{\"id\": \"abc\"}", response.toolCalls().get(0).arguments());
+    }
+
+    @Test
+    void 解析openai风格的缓存命中与思考token用量() {
+        // 兼容网关把命中数放在 prompt_tokens_details.cached_tokens，且用量片段没有 choices
+        serveSse("""
+                data: {"id":"1","object":"chat.completion.chunk","created":1,"model":"qwen","choices":[{"index":0,"delta":{"content":"好"},"finish_reason":null}]}
+
+                data: {"id":"1","object":"chat.completion.chunk","created":1,"model":"qwen","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":30,"total_tokens":130,"prompt_tokens_details":{"cached_tokens":64},"completion_tokens_details":{"reasoning_tokens":12}}}
+
+                data: {"id":"1","object":"chat.completion.chunk","created":1,"model":"qwen","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+                data: [DONE]
+
+                """);
+
+        List<ChatChunk> chunks = model.stream(new ChatRequest(List.of(
+                new ChatMessage(ChatMessage.Role.USER, "你好")))).collectList().block();
+
+        assertNotNull(chunks);
+        Usage usage = chunks.get(chunks.size() - 1).response().usage();
+        assertNotNull(usage);
+        assertEquals(100L, usage.promptTokens());
+        assertEquals(30L, usage.completionTokens());
+        assertEquals(64L, usage.promptCacheHitTokens(), "应读取 prompt_tokens_details.cached_tokens");
+        assertEquals(36L, usage.promptCacheMissTokens(), "未命中数由输入减去命中推出");
+        assertEquals(12L, usage.reasoningTokens());
     }
 
     private void serveSse(String sse) {

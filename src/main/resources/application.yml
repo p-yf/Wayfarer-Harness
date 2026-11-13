@@ -1,6 +1,14 @@
 server:
   port: 8080
 
+spring:
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          # 本地工具，前端改动后刷新即可生效，避免浏览器缓存旧脚本
+          no-cache: true
+
 wayfarer:
   model:
     api-key: ${DEEPSEEK_API_KEY:}

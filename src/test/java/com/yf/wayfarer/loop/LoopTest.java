@@ -11,7 +11,9 @@ import reactor.test.StepVerifier;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -135,6 +137,42 @@ class LoopTest {
         assertFalse(secondModel.await(300, TimeUnit.MILLISECONDS), "取消后不应启动新一轮模型调用");
         assertEquals(1, modelRuns.get());
         assertEquals(1, toolRuns.get());
+    }
+
+    @Test
+    void 下游分批请求时消息仍逐步送出() throws Exception {
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch emitted = new CountDownLatch(1);
+
+        Chain modelChain = Chain.of((ctx, next) -> Mono.fromRunnable(() -> {
+            ctx.agentMsgSink().accept(new AgentMessage.Text("t", "第一段"));
+            ctx.agentMsgSink().accept(new AgentMessage.Text("t", "第二段"));
+            emitted.countDown();
+            // 步骤尚未结束：此时第二段就应该已经送到下游
+            try {
+                release.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+            ctx.put(AgentContext.MODEL_RESPONSE, responseWithoutToolCall());
+        }));
+
+        BlockingQueue<AgentMessage> received = new LinkedBlockingQueue<>();
+        Disposable disposable = new Loop(modelChain, Chain.of((ctx, next) -> Mono.empty()))
+                .run(new AgentContext())
+                // 一次只请求一个，模拟 sse 写出这类分批请求的下游
+                .limitRate(1)
+                .subscribe(received::add);
+
+        try {
+            assertEquals(new AgentMessage.Text("t", "第一段"), received.poll(5, TimeUnit.SECONDS));
+            assertTrue(emitted.await(5, TimeUnit.SECONDS));
+            assertEquals(new AgentMessage.Text("t", "第二段"), received.poll(5, TimeUnit.SECONDS),
+                    "步骤未结束时第二段也应送出，不能憋到流结束");
+        } finally {
+            release.countDown();
+            disposable.dispose();
+        }
     }
 
     @Test

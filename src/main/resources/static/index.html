@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wayfarer</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234176e6'/%3E%3Cpath d='M8 10l5 12 3-8 3 8 5-12' stroke='white' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-head">
+        <button class="new-chat" id="newChatBtn">
+          <svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          新会话
+        </button>
+      </div>
+      <div class="session-list" id="sessionList"></div>
+      <div class="sidebar-foot">
+        <span class="foot-dot"></span>基于JSONL
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-btn sidebar-toggle" id="sidebarToggle" title="会话列表">
+          <svg viewBox="0 0 16 16" width="16" height="16"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+        <div class="brand">
+          <span class="brand-mark">W</span>
+          <span class="brand-name">行者</span>
+          <span class="brand-sub">Agent Harness</span>
+        </div>
+        <div class="topbar-right">
+          <span class="model-badge" id="modelBadge" title="当前启用的模型配置">未配置模型</span>
+          <button class="icon-btn" id="themeBtn" title="切换深浅色">
+            <svg viewBox="0 0 16 16" width="16" height="16"><path d="M8 1.5v1.4M8 13.1v1.4M1.5 8h1.4M13.1 8h1.4M3.4 3.4l1 1M11.6 11.6l1 1M12.6 3.4l-1 1M4.4 11.6l-1 1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="8" r="3.1" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          </button>
+          <button class="icon-btn" id="settingsBtn" title="设置">
+            <svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M8 1.8l.7 1.7 1.8.4 1.5-1 1 1-1 1.5.4 1.8 1.7.7v1.4l-1.7.7-.4 1.8 1 1.5-1 1-1.5-1-1.8.4-.7 1.7H7l-.7-1.7-1.8-.4-1.5 1-1-1 1-1.5-.4-1.8L1 9.1V7.7l1.7-.7.4-1.8-1-1.5 1-1 1.5 1 1.8-.4L7 1.8z" stroke="currentColor" stroke-width="1" fill="none" stroke-linejoin="round" transform="scale(0.92) translate(0.7,0.7)"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <section class="chat" id="chat">
+        <div class="chat-inner" id="chatInner">
+          <div class="empty" id="emptyState">
+            <div class="empty-logo">W</div>
+            <h1>今天想一起做点什么？</h1>
+            <p>行者 可以制定计划、调用工具，并把每一步持久化到会话。</p>
+          </div>
+        </div>
+        <div class="hitl-area" id="hitlArea"></div>
+      </section>
+
+      <footer class="composer-wrap">
+        <div class="composer" id="composer">
+          <textarea id="input" rows="1" placeholder="给 行者 发送消息，Enter 发送，Shift+Enter 换行"></textarea>
+          <div class="composer-bar">
+            <button class="ws-btn" id="workspaceBtn" title="选择工作区">
+              <svg viewBox="0 0 16 16" width="14" height="14"><path d="M1.8 4.2a1 1 0 0 1 1-1h3l1.3 1.4h5.1a1 1 0 0 1 1 1v6.2a1 1 0 0 1-1 1H2.8a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>
+              <span class="ws-name" id="workspaceName">未选择工作区</span>
+            </button>
+            <span class="composer-hint" id="composerHint"></span>
+            <button class="send-btn" id="sendBtn" title="发送">
+              <svg viewBox="0 0 16 16" width="15" height="15"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="stop-btn hidden" id="stopBtn">
+              <svg viewBox="0 0 16 16" width="12" height="12"><rect x="3" y="3" width="10" height="10" rx="2" fill="currentColor"/></svg>
+              停止
+            </button>
+          </div>
+        </div>
+      </footer>
+    </main>
+
+    <div class="drawer-mask hidden" id="drawerMask"></div>
+    <aside class="drawer hidden" id="drawer">
+      <div class="drawer-head">
+        <h2>设置</h2>
+        <button class="icon-btn" id="drawerClose" title="关闭">
+          <svg viewBox="0 0 16 16" width="16" height="16"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="drawer-tabs">
+        <button class="tab active" data-tab="model">模型配置</button>
+        <button class="tab" data-tab="compact">记忆压缩</button>
+        <button class="tab" data-tab="prompt">系统提示词</button>
+      </div>
+      <div class="drawer-body" id="drawerBody"></div>
+    </aside>
+
+    <div class="ws-mask hidden" id="wsMask"></div>
+    <div class="ws-dialog hidden" id="wsDialog">
+      <div class="ws-head">
+        <h2>选择工作区</h2>
+        <button class="icon-btn" id="wsClose" title="关闭">
+          <svg viewBox="0 0 16 16" width="16" height="16"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="ws-current" id="wsCurrent"></div>
+      <div class="ws-list" id="wsList"></div>
+      <div class="ws-foot">
+        <button class="btn btn-ghost" id="wsUp" type="button">上一级</button>
+        <button class="btn btn-primary" id="wsConfirm" type="button">选择此目录</button>
+      </div>
+    </div>
+
+    <div class="toast-wrap" id="toastWrap"></div>
+  </div>
+  <script src="/markdown.js"></script>
+  <script src="/api.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

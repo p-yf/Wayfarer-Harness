@@ -32,6 +32,11 @@ public interface Session {
     List<SessionMeta> list();
 
     /**
+     * 改写会话文件首行 METADATA 的内容，文件没有元数据行时插入到第一行。
+     */
+    void updateMetadata(String sessionId, Map<String, Object> content);
+
+    /**
      * 向指定会话追加一条消息，缺少 messageId 时自动生成 uuid。
      */
     void append(String sessionId, Map<String, Object> message);

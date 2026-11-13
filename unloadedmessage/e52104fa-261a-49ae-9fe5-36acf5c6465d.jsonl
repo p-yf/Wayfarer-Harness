@@ -1,0 +1,91 @@
+{"uuid":"6d14dc67-12ad-4e6e-ba67-fd0affaf87b3","content":"我目前可以使用以下工具：\n\n1. **`read_unloaded`** — 按 id 读取被卸载的完整消息内容，用于查看占位符指向的原文。\n2. **`plan_list`** — 展示当前的完整计划与状态。\n3. **`update_status`** — 更新计划中各项的状态（done / doing / not_begin）。\n4. **`plan`** — 编写或修改计划，支持按序号新增或覆盖计划内容。\n\n简单来说，这些工具主要围绕**计划管理**和**消息内容查看**两个场景。有什么需要我帮忙的吗？"}
+{"uuid":"9146f3be-479b-49fe-8174-9932a70ea74d","content":"我目前可以使用以下工具：\n\n| 工具 | 用途 |\n|------|------|\n| **`read`** | 读取文本文件内容，支持分段读取大文件 |\n| **`write`** | 写入文件内容，文件不存在时创建，存在时覆盖 |\n| **`edit`** | 对文件做精确文本替换 |\n| **`bash`** | 在当前工作区执行 shell 命令 |\n| **`plan`** | 编写或修改计划，支持按序号新增或覆盖 |\n| **`plan_list`** | 展示当前的完整计划与状态 |\n| **`update_status`** | 更新计划中各项的状态（done / doing / not_begin） |\n| **`read_unloaded`** | 按 id 读取被卸载的完整消息内容 |\n\n主要涵盖 **文件操作**（读、写、编辑）、**命令执行**（bash）和**计划管理**（plan 系列）三大类。有什么需要我帮忙的吗？"}
+{"uuid":"28d9b544-606d-41ec-b963-0d37ab6a08b5","content":"我目前可以使用以下工具：\n\n1. **`read_unloaded`** — 按 id 读取被卸载的完整消息内容，用于查看占位符指向的原文。\n2. **`plan_list`** — 展示当前的完整计\n<sys-unloaded-6d14dc67-12ad-4e6e-ba67-fd0affaf87b3>\not_begin）。\n4. **`plan`** — 编写或修改计划，支持按序号新增或覆盖计划内容。\n\n简单来说，这些工具主要围绕**计划管理**和**消息内容查看**两个场景。有什么需要我帮忙的吗？"}
+{"uuid":"73e26620-1f35-4a43-ba5d-abd7fecb0c66","content":"我目前可以使用以下工具：\n\n| 工具 | 用途 |\n|------|------|\n| **`read`** | 读取文本文件内容，支持分段读取大文件 |\n| **`write`** | 写入文件内容\n<sys-unloaded-9146f3be-479b-49fe-8174-9932a70ea74d>\naded`** | 按 id 读取被卸载的完整消息内容 |\n\n主要涵盖 **文件操作**（读、写、编辑）、**命令执行**（bash）和**计划管理**（plan 系列）三大类。有什么需要我帮忙的吗？"}
+{"uuid":"8d73e236-f25c-40fc-a3b4-61c16ee83881","content":"'pwd' �����ڲ����ⲿ���Ҳ���ǿ����еĳ���\r\n���������ļ���\r\n\n\n命令退出码 1"}
+{"uuid":"ae44b27e-f9e4-406b-bd80-0d7af78bb1be","content":"D:\\ah my thing and app directory also mine\\project\\JavaProject\\my-project\\wayfarer-harness\r\n"}
+{"uuid":"e837d5f2-26fc-4ae7-ae4b-ab0fdcc4e6f6","content":"<sys-unloaded-8d73e236-f25c-40fc-a3b4-61c16ee83881>"}
+{"uuid":"3189bd5a-dc06-4d99-8e23-c9b641c6641d","content":"<sys-unloaded-ae44b27e-f9e4-406b-bd80-0d7af78bb1be>"}
+{"uuid":"b5668879-3452-4e29-a21b-af23ac04e615","content":"<sys-unloaded-e837d5f2-26fc-4ae7-ae4b-ab0fdcc4e6f6>"}
+{"uuid":"283848d1-b013-45ee-b3e6-f97c26edfe4f","content":"<sys-unloaded-3189bd5a-dc06-4d99-8e23-c9b641c6641d>"}
+{"uuid":"d7d7711f-9a3a-4263-99cb-00f69f127d5f","content":"<sys-unloaded-b5668879-3452-4e29-a21b-af23ac04e615>"}
+{"uuid":"89d9a54d-8724-4178-bf5b-c4991dcf6f78","content":"<sys-unloaded-283848d1-b013-45ee-b3e6-f97c26edfe4f>"}
+{"uuid":"58711688-af34-4343-b924-7c22175a9001","content":"D:\\ah my thing and app directory also mine\\project\\JavaProject\\my-project\\wayfarer-harness\r\n"}
+{"uuid":"f6a680bf-3b0f-4c2e-98ca-eed6bf78053f","content":"<sys-unloaded-d7d7711f-9a3a-4263-99cb-00f69f127d5f>"}
+{"uuid":"c195fd0c-4f56-4ad2-91b8-be162b6a27c5","content":"<sys-unloaded-89d9a54d-8724-4178-bf5b-c4991dcf6f78>"}
+{"uuid":"ce1abdb9-03dd-4fbd-bc56-800613b688ee","content":"<sys-unloaded-58711688-af34-4343-b924-7c22175a9001>"}
+{"uuid":"6ef95cb4-7910-494c-acdc-30995354bf37","content":"<sys-unloaded-f6a680bf-3b0f-4c2e-98ca-eed6bf78053f>"}
+{"uuid":"e5e00224-984b-420b-ac56-e2f5701e9463","content":"<sys-unloaded-c195fd0c-4f56-4ad2-91b8-be162b6a27c5>"}
+{"uuid":"280f04d3-2e08-4d36-81d2-6380b75b5d10","content":"<sys-unloaded-ce1abdb9-03dd-4fbd-bc56-800613b688ee>"}
+{"uuid":"84462c87-5345-47f6-a262-883acd683bf9","content":"<sys-unloaded-6ef95cb4-7910-494c-acdc-30995354bf37>"}
+{"uuid":"e5db12d3-bc9f-4940-a17e-4a12facd3c72","content":"<sys-unloaded-e5e00224-984b-420b-ac56-e2f5701e9463>"}
+{"uuid":"6d112b03-ee85-40b3-862f-4d424fd2c598","content":"<sys-unloaded-280f04d3-2e08-4d36-81d2-6380b75b5d10>"}
+{"uuid":"46eb4502-b4b3-4236-b1f8-1b177dd709e2","content":"<sys-unloaded-ce1abdb9-03dd-4fbd-bc56-800613b688ee>"}
+{"uuid":"1ba3c79c-b713-4a96-94d3-9ef89b46bb43","content":"<sys-unloaded-f6a680bf-3b0f-4c2e-98ca-eed6bf78053f>"}
+{"uuid":"f48ad4f2-6be9-483f-92f0-d2f8d523158b","content":"<sys-unloaded-c195fd0c-4f56-4ad2-91b8-be162b6a27c5>"}
+{"uuid":"f6a28d8c-cbce-4506-99be-d65f083f0fa0","content":"<sys-unloaded-84462c87-5345-47f6-a262-883acd683bf9>"}
+{"uuid":"06d3d434-27b0-4649-976e-eea09b27b131","content":"<sys-unloaded-e5db12d3-bc9f-4940-a17e-4a12facd3c72>"}
+{"uuid":"d3a4bda8-fe95-4ed8-8741-16b3600ce04b","content":"<sys-unloaded-6d112b03-ee85-40b3-862f-4d424fd2c598>"}
+{"uuid":"9db44262-5de9-4c39-8ac2-e0a7a7781ba1","content":"<sys-unloaded-46eb4502-b4b3-4236-b1f8-1b177dd709e2>"}
+{"uuid":"e56978b0-06ee-4704-8216-5ec657f7ef23","content":"<sys-unloaded-1ba3c79c-b713-4a96-94d3-9ef89b46bb43>"}
+{"uuid":"c90ede6c-b573-4cb5-9278-fd2179e03b53","content":"<sys-unloaded-f48ad4f2-6be9-483f-92f0-d2f8d523158b>"}
+{"uuid":"44437752-8bfd-492c-a49e-2c0321e1860f","content":"<sys-unloaded-6ef95cb4-7910-494c-acdc-30995354bf37>"}
+{"uuid":"994ba6a7-8252-4e40-a4e9-57e98b35eb8a","content":"<sys-unloaded-e5e00224-984b-420b-ac56-e2f5701e9463>"}
+{"uuid":"878aed0f-872a-4b96-94f8-2744dd438136","content":"<sys-unloaded-280f04d3-2e08-4d36-81d2-6380b75b5d10>"}
+{"uuid":"e58d3775-4d74-4d7c-a231-34e59f777d67","content":"<sys-unloaded-f6a28d8c-cbce-4506-99be-d65f083f0fa0>"}
+{"uuid":"927a23ca-eaaa-4ab7-91ec-38dbb27a5e56","content":"<sys-unloaded-06d3d434-27b0-4649-976e-eea09b27b131>"}
+{"uuid":"eb48af26-b7b5-4f41-a160-f23953bf2af6","content":"<sys-unloaded-d3a4bda8-fe95-4ed8-8741-16b3600ce04b>"}
+{"uuid":"88d6678a-c4b2-4aeb-8b57-ce9a9ce08050","content":"<sys-unloaded-9db44262-5de9-4c39-8ac2-e0a7a7781ba1>"}
+{"uuid":"41ccb644-6803-4514-a9c5-ff416ca1553d","content":"<sys-unloaded-e56978b0-06ee-4704-8216-5ec657f7ef23>"}
+{"uuid":"53335f98-e7a6-49d4-8ffa-f80b025c9acc","content":"<sys-unloaded-c90ede6c-b573-4cb5-9278-fd2179e03b53>"}
+{"uuid":"9b36a74b-f5fe-4603-b8d9-9fedf2857437","content":"<sys-unloaded-44437752-8bfd-492c-a49e-2c0321e1860f>"}
+{"uuid":"24205906-ad73-4f23-9222-2c4c98674dce","content":"<sys-unloaded-994ba6a7-8252-4e40-a4e9-57e98b35eb8a>"}
+{"uuid":"8eb05904-99a3-47b5-a78d-e5f46bb0ab17","content":"<sys-unloaded-878aed0f-872a-4b96-94f8-2744dd438136>"}
+{"uuid":"a9d31178-e54c-404c-8702-55395430cb5e","content":"D:\\ah my thing and app directory also mine\\project\\JavaProject\\my-project\\wayfarer-harness\r\n"}
+{"uuid":"9a7fd037-1f36-4654-a75e-29191bb00077","content":"<sys-unloaded-e58d3775-4d74-4d7c-a231-34e59f777d67>"}
+{"uuid":"cf2f95a0-8a1d-4de9-a042-cae53221704a","content":"<sys-unloaded-927a23ca-eaaa-4ab7-91ec-38dbb27a5e56>"}
+{"uuid":"881a3bf4-e3a4-4d12-9da4-8352478620e0","content":"<sys-unloaded-eb48af26-b7b5-4f41-a160-f23953bf2af6>"}
+{"uuid":"759948d2-04f3-400c-a46b-4e4b9df1e36d","content":"<sys-unloaded-88d6678a-c4b2-4aeb-8b57-ce9a9ce08050>"}
+{"uuid":"3a343880-dfed-457e-a73d-42c095069268","content":"<sys-unloaded-41ccb644-6803-4514-a9c5-ff416ca1553d>"}
+{"uuid":"9af35b5a-ca51-4115-bfe1-1d029a120b2f","content":"<sys-unloaded-53335f98-e7a6-49d4-8ffa-f80b025c9acc>"}
+{"uuid":"3d1a8b5b-40a4-4ce7-b9b7-4e9703fed96c","content":"<sys-unloaded-9b36a74b-f5fe-4603-b8d9-9fedf2857437>"}
+{"uuid":"358b6691-d988-427e-9a75-8da36f72af2d","content":"<sys-unloaded-24205906-ad73-4f23-9222-2c4c98674dce>"}
+{"uuid":"8332813d-f9fd-45c5-ab7f-5aa24fd90654","content":"<sys-unloaded-8eb05904-99a3-47b5-a78d-e5f46bb0ab17>"}
+{"uuid":"8c8de0d7-1318-40ee-9f54-87431924f878","content":"<sys-unloaded-a9d31178-e54c-404c-8702-55395430cb5e>"}
+{"uuid":"d9a21035-535e-4b60-91a1-69232b7846b3","content":"D:\\ah my thing and app directory also mine\\project\\JavaProject\\my-project\\wayfarer-harness\r\n"}
+{"uuid":"9ecb0a9e-1c3d-45e0-9ad4-5d5b6a84d2a3","content":"<sys-unloaded-9a7fd037-1f36-4654-a75e-29191bb00077>"}
+{"uuid":"198634e0-e9de-44cc-880d-0ec845ff52b4","content":"<sys-unloaded-cf2f95a0-8a1d-4de9-a042-cae53221704a>"}
+{"uuid":"7be2c3c7-7bea-4361-a67d-d0625565c8f9","content":"<sys-unloaded-881a3bf4-e3a4-4d12-9da4-8352478620e0>"}
+{"uuid":"4edda933-f3f5-43a0-9cf5-facf179a63d9","content":"<sys-unloaded-759948d2-04f3-400c-a46b-4e4b9df1e36d>"}
+{"uuid":"e0c47099-a88b-4e1c-8d9d-ec108fb51ed5","content":"<sys-unloaded-3a343880-dfed-457e-a73d-42c095069268>"}
+{"uuid":"09b28b93-c791-4554-b6d4-84f5357bbdde","content":"<sys-unloaded-9af35b5a-ca51-4115-bfe1-1d029a120b2f>"}
+{"uuid":"45b1317e-f192-4345-a688-dd3ec7b18b00","content":"<sys-unloaded-3d1a8b5b-40a4-4ce7-b9b7-4e9703fed96c>"}
+{"uuid":"22323de5-194a-4eee-b40a-7282e489b524","content":"<sys-unloaded-358b6691-d988-427e-9a75-8da36f72af2d>"}
+{"uuid":"9c75869e-d4c4-4270-8f35-44c4a1b41e22","content":"<sys-unloaded-8332813d-f9fd-45c5-ab7f-5aa24fd90654>"}
+{"uuid":"1427e7e2-c259-4805-86ff-ec1eef50129c","content":"<sys-unloaded-8c8de0d7-1318-40ee-9f54-87431924f878>"}
+{"uuid":"342358f5-fe07-4541-bb32-7b0e7e75f437","content":"<sys-unloaded-d9a21035-535e-4b60-91a1-69232b7846b3>"}
+{"uuid":"27d23654-d9a2-4ca1-b6b4-a6f6828c7ea1","content":"<sys-unloaded-9ecb0a9e-1c3d-45e0-9ad4-5d5b6a84d2a3>"}
+{"uuid":"7965cf61-5bff-4aa4-961c-a9cc51fa6eed","content":"<sys-unloaded-198634e0-e9de-44cc-880d-0ec845ff52b4>"}
+{"uuid":"788c4852-05b3-4f8c-8194-ea57ed6629d3","content":"<sys-unloaded-7be2c3c7-7bea-4361-a67d-d0625565c8f9>"}
+{"uuid":"18531b16-d614-4dab-804d-d72d7d4f50a9","content":"<sys-unloaded-4edda933-f3f5-43a0-9cf5-facf179a63d9>"}
+{"uuid":"90d5ae26-742f-471c-9c98-ac4a6d26af4d","content":"<sys-unloaded-e0c47099-a88b-4e1c-8d9d-ec108fb51ed5>"}
+{"uuid":"912859d5-8662-42d0-abf9-6d2d0ef93c37","content":"<sys-unloaded-09b28b93-c791-4554-b6d4-84f5357bbdde>"}
+{"uuid":"3e2fe8d3-003f-4822-a425-69243ba8f6f3","content":"<sys-unloaded-45b1317e-f192-4345-a688-dd3ec7b18b00>"}
+{"uuid":"6ee8614f-105b-449b-9e6f-c47fb6cb0fe9","content":"<sys-unloaded-22323de5-194a-4eee-b40a-7282e489b524>"}
+{"uuid":"94aeee59-7d42-44c7-9bf7-98a8d7061cb3","content":"<sys-unloaded-9c75869e-d4c4-4270-8f35-44c4a1b41e22>"}
+{"uuid":"778253e5-3aa9-4e62-849f-3facc044d201","content":"<sys-unloaded-1427e7e2-c259-4805-86ff-ec1eef50129c>"}
+{"uuid":"f9de367e-5c9e-493b-960b-4edd81e05a46","content":"<sys-unloaded-342358f5-fe07-4541-bb32-7b0e7e75f437>"}
+{"uuid":"db734bfb-8384-43d5-85d5-7db6d28af151","content":"D:\\ah my thing and app directory also mine\\project\\JavaProject\\my-project\\wayfarer-harness\r\n"}
+{"uuid":"f2105f5d-8384-45a0-bf82-7ce2e3d45f82","content":"<sys-unloaded-27d23654-d9a2-4ca1-b6b4-a6f6828c7ea1>"}
+{"uuid":"581c07b2-d747-481e-9a49-6e5cb31023c8","content":"<sys-unloaded-7965cf61-5bff-4aa4-961c-a9cc51fa6eed>"}
+{"uuid":"150de48f-8631-4fae-bd5a-f39f1ec182cf","content":"<sys-unloaded-788c4852-05b3-4f8c-8194-ea57ed6629d3>"}
+{"uuid":"d7680ce2-c63f-4505-bbb2-ba5e919d6e0a","content":"<sys-unloaded-18531b16-d614-4dab-804d-d72d7d4f50a9>"}
+{"uuid":"cd3d4ad4-8b85-4c9f-b23a-4102ea327911","content":"<sys-unloaded-90d5ae26-742f-471c-9c98-ac4a6d26af4d>"}
+{"uuid":"c93a6724-5ee4-4968-81f2-48a5281a388b","content":"<sys-unloaded-912859d5-8662-42d0-abf9-6d2d0ef93c37>"}
+{"uuid":"9749b67f-348f-4b6c-8666-fb7c19382838","content":"<sys-unloaded-3e2fe8d3-003f-4822-a425-69243ba8f6f3>"}
+{"uuid":"c256ac1c-92c3-4e93-a958-36f2b389c65c","content":"<sys-unloaded-6ee8614f-105b-449b-9e6f-c47fb6cb0fe9>"}
+{"uuid":"f4367b43-70a2-49df-85e6-0a83b421d067","content":"<sys-unloaded-94aeee59-7d42-44c7-9bf7-98a8d7061cb3>"}
+{"uuid":"604a0f84-e333-4a4a-81d2-3198003cebae","content":"<sys-unloaded-778253e5-3aa9-4e62-849f-3facc044d201>"}
+{"uuid":"e1675572-3c81-4fb3-9fac-dd604518a9c9","content":"<sys-unloaded-f9de367e-5c9e-493b-960b-4edd81e05a46>"}
+{"uuid":"c6e9a68e-fcd2-447d-a5f1-ebd9f07d6ecb","content":"<sys-unloaded-db734bfb-8384-43d5-85d5-7db6d28af151>"}
+{"uuid":"3d0122b5-c425-4afd-a897-09c1611c598f","content":"未找到卸载记录：9429b31d-b760-4dc8-a300-6c49d41cc0be"}

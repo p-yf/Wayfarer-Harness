@@ -7,6 +7,7 @@ import com.yf.wayfarer.session.JSONMsgType;
 import com.yf.wayfarer.session.Session;
 import com.yf.wayfarer.session.SessionMessage;
 import com.yf.wayfarer.session.SessionMeta;
+import com.yf.wayfarer.session.UnloadedMessageStore;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -98,6 +99,9 @@ class AgentWebTest {
 
     @Autowired
     Session session;
+
+    @Autowired
+    UnloadedMessageStore unloadedStore;
 
     @Autowired
     HitlService hitlService;
@@ -204,11 +208,12 @@ class AgentWebTest {
         assertFalse(String.join("", events).contains("\"chunk\""), "不应再推送内部消息外壳：" + events);
 
         List<SessionMessage> stored = session.messages(sessionId);
-        assertEquals(3, stored.size());
+        assertEquals(4, stored.size());
         assertEquals("turn-web", stored.get(0).traceId());
         assertEquals(JSONMsgType.ASSISTANT, stored.get(1).type());
         assertEquals("turn-web", stored.get(1).traceId(), "助手消息应沿用调用方指定的 trace id");
-        assertEquals("cursor-9", stored.get(2).content().get("store:cursor"));
+        assertEquals(JSONMsgType.EXTRADATA, stored.get(2).type());
+        assertEquals("cursor-9", stored.get(3).content().get("store:cursor"));
     }
 
     @Test
@@ -358,6 +363,91 @@ class AgentWebTest {
         client.post().uri("/api/hitl")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(Map.of("toolCallId", "nobody-waiting"))
+                .exchange()
+                .expectStatus().isBadRequest();
+    }
+
+    @Test
+    void 分支会话只保留指定轮次之前的消息并复制卸载内容() {
+        String sessionId = session.create("分支会话");
+        String uuid = unloadedStore.save(sessionId, "第一轮的大段日志原文");
+        session.append(sessionId, JSONMsgType.USER, "turn-1", userContent("一"));
+        session.append(sessionId, JSONMsgType.ASSISTANT, "turn-1",
+                assistantContent("摘要<sys-unloaded-" + uuid + ">"));
+        session.append(sessionId, JSONMsgType.USER, "turn-2", userContent("二"));
+        session.append(sessionId, JSONMsgType.ASSISTANT, "turn-2", assistantContent("二答"));
+
+        Map<?, ?> forkedBody = client.post()
+                .uri(uri -> uri.path("/api/sessions/{id}/fork").queryParam("traceId", "turn-2").build(sessionId))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(Map.class)
+                .returnResult()
+                .getResponseBody();
+        assertTrue(forkedBody != null);
+        String forkedId = String.valueOf(forkedBody.get("sessionId"));
+
+        List<SessionMessage> forked = session.messages(forkedId);
+        assertEquals(2, forked.size(), "应只保留第一轮的两条消息");
+        assertEquals("turn-1", forked.get(0).traceId());
+        assertEquals("第一轮的大段日志原文", unloadedStore.read(forkedId, uuid),
+                "卸载内容应随分支复制，否则占位符无法解析");
+    }
+
+    @Test
+    void 复制会话保留全部消息与卸载内容() {
+        String sessionId = session.create("复制会话");
+        String uuid = unloadedStore.save(sessionId, "被卸载的长文本");
+        session.append(sessionId, JSONMsgType.USER, "turn-1", userContent("一"));
+        session.append(sessionId, JSONMsgType.ASSISTANT, "turn-1",
+                assistantContent("摘要<sys-unloaded-" + uuid + ">"));
+
+        Map<?, ?> clonedBody = client.post().uri("/api/sessions/{id}/clone", sessionId)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(Map.class)
+                .returnResult()
+                .getResponseBody();
+        assertTrue(clonedBody != null);
+        String clonedId = String.valueOf(clonedBody.get("sessionId"));
+
+        assertEquals(2, session.messages(clonedId).size());
+        assertEquals("被卸载的长文本", unloadedStore.read(clonedId, uuid),
+                "卸载内容应随复制带到新会话");
+    }
+
+    @Test
+    void 回退会话删除指定轮次及之后的全部消息() {
+        String sessionId = session.create("回退会话");
+        session.append(sessionId, JSONMsgType.USER, "turn-1", userContent("一"));
+        session.append(sessionId, JSONMsgType.ASSISTANT, "turn-1", assistantContent("一答"));
+        session.append(sessionId, JSONMsgType.USER, "turn-2", userContent("二"));
+        session.append(sessionId, JSONMsgType.ASSISTANT, "turn-2", assistantContent("二答"));
+
+        client.post()
+                .uri(uri -> uri.path("/api/sessions/{id}/reset").queryParam("traceId", "turn-2").build(sessionId))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.resetFrom").isEqualTo("turn-2");
+
+        List<SessionMessage> remained = session.messages(sessionId);
+        assertEquals(2, remained.size(), "第二轮及之后的消息应被删除");
+        assertEquals("turn-1", remained.get(1).traceId());
+    }
+
+    @Test
+    void 分支或回退到不存在的轮次时返回错误() {
+        String sessionId = session.create("错误分支");
+        session.append(sessionId, JSONMsgType.USER, "turn-1", userContent("一"));
+
+        client.post()
+                .uri(uri -> uri.path("/api/sessions/{id}/fork").queryParam("traceId", "turn-9").build(sessionId))
+                .exchange()
+                .expectStatus().isBadRequest();
+
+        client.post()
+                .uri(uri -> uri.path("/api/sessions/{id}/reset").queryParam("traceId", "turn-9").build(sessionId))
                 .exchange()
                 .expectStatus().isBadRequest();
     }

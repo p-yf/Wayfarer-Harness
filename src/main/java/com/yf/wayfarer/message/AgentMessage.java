@@ -64,6 +64,16 @@ public sealed interface AgentMessage {
     }
 
     /**
+     * 一轮模型调用的附加数据。
+     *
+     * @author yyf
+     * @description 用时、结束原因与用量，同时写入会话的 EXTRADATA 消息，刷新页面后仍可展示
+     */
+    record TraceData(String traceId, FinishReason finishReason, Usage usage, Long durationMs)
+            implements AgentMessage {
+    }
+
+    /**
      * 其他消息。
      *
      * @author yyf

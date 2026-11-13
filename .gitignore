@@ -25,3 +25,6 @@ Thumbs.db
 
 # 本地配置
 *.local
+/sessions/
+/memorycompactconfig/
+/modelconfig/

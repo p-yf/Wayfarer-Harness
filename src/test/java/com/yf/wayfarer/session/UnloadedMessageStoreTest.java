@@ -69,6 +69,29 @@ class UnloadedMessageStoreTest {
     }
 
     @Test
+    void 复制会话卸载内容保留原id() {
+        UnloadedMessageStore store = new UnloadedMessageStore(root);
+        String first = store.save("session-a", "一");
+        String second = store.save("session-a", "二");
+
+        store.copyAll("session-a", "session-copy");
+
+        assertEquals("一", store.read("session-copy", first));
+        assertEquals("二", store.read("session-copy", second));
+        assertEquals(List.of(first, second), store.ids("session-copy"));
+        assertEquals(List.of(first, second), store.ids("session-a"), "源会话内容不受影响");
+    }
+
+    @Test
+    void 源会话没有卸载内容时不生成目标文件() {
+        UnloadedMessageStore store = new UnloadedMessageStore(root);
+
+        store.copyAll("session-empty", "session-copy");
+
+        assertFalse(Files.exists(root.resolve("session-copy.jsonl")));
+    }
+
+    @Test
     void 会话级清理删除整个文件() {
         UnloadedMessageStore store = new UnloadedMessageStore(root);
         store.save("session-a", "一");

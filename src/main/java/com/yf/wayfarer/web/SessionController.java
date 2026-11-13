@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -54,6 +55,16 @@ public class SessionController {
     }
 
     /**
+     * 改写会话文件首行 METADATA 的内容，用于保存工作区等任意键值对。
+     */
+    @PutMapping("/{sessionId}/metadata")
+    public SessionMeta updateMetadata(@PathVariable String sessionId,
+                                      @RequestBody(required = false) Map<String, Object> content) {
+        session.updateMetadata(sessionId, content == null ? Map.of() : content);
+        return session.meta(sessionId);
+    }
+
+    /**
      * 向会话追加一条消息，未指定 trace id 时自动生成并返回，便于与该次运行对应。
      */
     @SuppressWarnings("unchecked")
@@ -94,14 +105,37 @@ public class SessionController {
         return session.historyBefore(sessionId, traceId, turns);
     }
 
+    /**
+     * 从指定轮次分支：克隆该轮次之前的全部消息到新会话。
+     * 卸载内容一并复制，保证新会话里已有的占位符仍能解析到原文。
+     */
     @PostMapping("/{sessionId}/fork")
     public Map<String, Object> fork(@PathVariable String sessionId, @RequestParam String traceId) {
-        return idResult(session.fork(sessionId, traceId));
+        String forkedId = session.fork(sessionId, traceId);
+        unloadedStore.copyAll(sessionId, forkedId);
+        return idResult(forkedId);
     }
 
+    /**
+     * 复制整个会话到新会话，卸载内容一并复制。
+     */
     @PostMapping("/{sessionId}/clone")
     public Map<String, Object> clone(@PathVariable String sessionId) {
-        return idResult(session.clone(sessionId));
+        String clonedId = session.clone(sessionId);
+        unloadedStore.copyAll(sessionId, clonedId);
+        return idResult(clonedId);
+    }
+
+    /**
+     * 回退会话：删除指定轮次及其之后的全部消息，该轮次之前的对话保留。
+     */
+    @PostMapping("/{sessionId}/reset")
+    public Map<String, Object> reset(@PathVariable String sessionId, @RequestParam String traceId) {
+        session.reset(sessionId, traceId);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("sessionId", sessionId);
+        result.put("resetFrom", traceId);
+        return result;
     }
 
     /**
@@ -114,15 +148,6 @@ public class SessionController {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("sessionId", sessionId);
         result.put("deleted", true);
-        return result;
-    }
-
-    @DeleteMapping("/{sessionId}/traces/{traceId}")
-    public Map<String, Object> reset(@PathVariable String sessionId, @PathVariable String traceId) {
-        session.reset(sessionId, traceId);
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("sessionId", sessionId);
-        result.put("resetFrom", traceId);
         return result;
     }
 

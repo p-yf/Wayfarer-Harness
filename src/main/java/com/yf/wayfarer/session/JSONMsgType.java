@@ -4,12 +4,15 @@ package com.yf.wayfarer.session;
  * 会话消息类型。
  *
  * @author yyf
- * @description 对话消息（USER/ASSISTANT/TOOL）、自定义状态消息（CUSTOM）与压缩快照消息（COMPACT）
+ * @description 文件元数据（METADATA）、对话消息（USER/ASSISTANT/TOOL）、自定义状态消息（CUSTOM）、
+ * 压缩快照消息（COMPACT）与运行附加数据（EXTRADATA）
  */
 public enum JSONMsgType {
+    METADATA,
     USER,
     ASSISTANT,
     TOOL,
     CUSTOM,
-    COMPACT
+    COMPACT,
+    EXTRADATA
 }

@@ -8,6 +8,8 @@ import com.yf.wayfarer.model.ChatModel;
 import com.yf.wayfarer.model.ChatRequest;
 import com.yf.wayfarer.model.ModelResponse;
 import com.yf.wayfarer.toolcall.ToolDefinition;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
 
 import java.util.ArrayList;
@@ -22,6 +24,8 @@ import java.util.function.Consumer;
  */
 public class ModelHandler implements ChainHandler {
 
+    private static final Logger log = LoggerFactory.getLogger(ModelHandler.class);
+
     private final ChatModel model;
     private final List<ToolDefinition> tools;
 
@@ -32,11 +36,17 @@ public class ModelHandler implements ChainHandler {
 
     @Override
     public Mono<Void> run(AgentContext context, Mono<Void> next) {
-        return model.stream(new ChatRequest(requestMessages(context), tools))
+        List<ChatMessage> messages = requestMessages(context);
+        log.info("请求模型 traceId={} 消息数={} 工具数={}", context.traceId(), messages.size(), tools.size());
+        return model.stream(new ChatRequest(messages, tools))
                 .doOnNext(chunk -> {
                     ModelResponse response = chunk.response();
                     if (response != null) {
                         context.put(AgentContext.MODEL_RESPONSE, response);
+                        if (response.finishReason() != null) {
+                            log.info("模型响应 traceId={} finishReason={} usage={}",
+                                    context.traceId(), response.finishReason(), response.usage());
+                        }
                     }
                     Consumer<AgentMessage> sink = context.agentMsgSink();
                     if (sink == null) {

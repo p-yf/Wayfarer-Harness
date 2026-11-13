@@ -11,5 +11,6 @@ public record Usage(
         Long completionTokens,
         Long totalTokens,
         Long promptCacheHitTokens,
-        Long promptCacheMissTokens) {
+        Long promptCacheMissTokens,
+        Long reasoningTokens) {
 }

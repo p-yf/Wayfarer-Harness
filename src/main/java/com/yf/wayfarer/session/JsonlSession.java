@@ -56,7 +56,8 @@ public final class JsonlSession implements Session {
             String id = UUID.randomUUID().toString();
             Path file = root.resolve(id + SEPARATOR + sanitize(name) + SEPARATOR
                     + Instant.now().toEpochMilli() + SUFFIX);
-            Files.writeString(file, "", StandardCharsets.UTF_8,
+            // 首行固定是文件元数据：只放任意键值对，不带 messageId 与 traceId
+            Files.writeString(file, metadataLine(Map.of()) + System.lineSeparator(), StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
             return id;
         } catch (IOException e) {
@@ -70,6 +71,25 @@ public final class JsonlSession implements Session {
     }
 
     @Override
+    public synchronized void updateMetadata(String sessionId, Map<String, Object> content) {
+        Path file = resolve(sessionId);
+        List<String> lines = readLines(file);
+        String line = metadataLine(content == null ? Map.of() : content);
+        // 资源管理器、编辑器等工具可能重排首行之外的内容，只替换或插入元数据行，其余行原样保留
+        if (!lines.isEmpty() && isMetadata(lines.get(0))) {
+            lines.set(0, line);
+        } else {
+            lines.add(0, line);
+        }
+        try {
+            Files.writeString(file, joinLines(lines), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    @Override
     public List<SessionMeta> list() {
         if (!Files.isDirectory(root)) {
             return List.of();
@@ -77,7 +97,7 @@ public final class JsonlSession implements Session {
         try (Stream<Path> files = Files.list(root)) {
             return files
                     .filter(path -> path.getFileName().toString().endsWith(SUFFIX))
-                    .map(JsonlSession::parseMeta)
+                    .map(this::parseMeta)
                     // 按创建时间倒序，最近的会话在前
                     .sorted((left, right) -> right.createdAt().compareTo(left.createdAt()))
                     .toList();
@@ -101,7 +121,10 @@ public final class JsonlSession implements Session {
 
     @Override
     public List<SessionMessage> messages(String sessionId) {
-        return parse(readLines(resolve(sessionId)));
+        // 元数据行属于文件头，不参与对话消息与历史回放
+        return parse(readLines(resolve(sessionId))).stream()
+                .filter(message -> message.type() != JSONMsgType.METADATA)
+                .toList();
     }
 
     @Override
@@ -127,7 +150,7 @@ public final class JsonlSession implements Session {
     }
 
     @Override
-    public String fork(String sessionId, String traceId) {
+    public synchronized String fork(String sessionId, String traceId) {
         Path file = resolve(sessionId);
         List<String> lines = readLines(file);
         int cut = cutAt(parse(lines), traceId);
@@ -136,7 +159,7 @@ public final class JsonlSession implements Session {
     }
 
     @Override
-    public String clone(String sessionId) {
+    public synchronized String clone(String sessionId) {
         Path file = resolve(sessionId);
         return copy(meta(sessionId).name() + "-copy", readLines(file));
     }
@@ -225,7 +248,7 @@ public final class JsonlSession implements Session {
         }
     }
 
-    private static SessionMeta parseMeta(Path file) {
+    private SessionMeta parseMeta(Path file) {
         String fileName = file.getFileName().toString();
         String base = fileName.substring(0, fileName.length() - SUFFIX.length());
         int first = base.indexOf(SEPARATOR);
@@ -233,7 +256,42 @@ public final class JsonlSession implements Session {
         return new SessionMeta(
                 base.substring(0, first),
                 base.substring(first + 1, last),
-                Instant.ofEpochMilli(Long.parseLong(base.substring(last + 1))));
+                Instant.ofEpochMilli(Long.parseLong(base.substring(last + 1))),
+                readMetadata(file));
+    }
+
+    /**
+     * 读取文件首行的元数据键值对，旧文件没有元数据行时返回空映射。
+     */
+    private Map<String, Object> readMetadata(Path file) {
+        List<String> lines = readLines(file);
+        if (lines.isEmpty() || !isMetadata(lines.get(0))) {
+            return Map.of();
+        }
+        try {
+            SessionMessage message = mapper.readValue(lines.get(0), SessionMessage.class);
+            return message.content();
+        } catch (IOException e) {
+            return Map.of();
+        }
+    }
+
+    /**
+     * 元数据行只有 type 与 content，不写 messageId、traceId。
+     */
+    private String metadataLine(Map<String, Object> content) {
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("type", JSONMsgType.METADATA.name());
+        line.put("content", content);
+        try {
+            return mapper.writeValueAsString(line);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private static boolean isMetadata(String line) {
+        return line != null && line.replace(" ", "").startsWith("{\"type\":\"METADATA\"");
     }
 
     /**

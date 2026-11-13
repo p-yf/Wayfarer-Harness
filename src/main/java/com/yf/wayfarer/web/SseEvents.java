@@ -26,11 +26,23 @@ public final class SseEvents {
             case AgentMessage.ToolCall call -> Flux.just(event("tool_call", call));
             case AgentMessage.ToolResult result -> Flux.just(event("tool_result", result));
             case AgentMessage.End end -> Flux.just(event("message_end", end));
+            case AgentMessage.TraceData trace -> Flux.just(event("trace_data", trace));
             case AgentMessage.Other other -> Flux.just(event("other", other.message()));
         };
     }
 
     private static ServerSentEvent<Object> event(String name, Object data) {
         return ServerSentEvent.builder(data).event(name).build();
+    }
+
+    /**
+     * 运行期异常转成一条 other 事件。
+     * 流已经开始写出后无法再改 http 状态，直接抛给框架会让连接被掐断，前端只看到「连接中断」。
+     */
+    public static ServerSentEvent<Object> error(Throwable error) {
+        String detail = error.getMessage() == null || error.getMessage().isBlank()
+                ? error.getClass().getSimpleName()
+                : error.getMessage();
+        return event("other", "出错：" + detail);
     }
 }

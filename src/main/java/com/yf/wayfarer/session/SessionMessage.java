@@ -30,7 +30,8 @@ public record SessionMessage(String messageId, String traceId, JSONMsgType type,
         if (message.toolCallId() != null) {
             map.put("toolCallId", message.toolCallId());
         }
-        if (message.reasoningContent() != null) {
+        // 思考内容为空时不写该字段，避免会话文件里出现无意义的空串
+        if (message.reasoningContent() != null && !message.reasoningContent().isBlank()) {
             map.put("reasoningContent", message.reasoningContent());
         }
         if (!message.toolCalls().isEmpty()) {

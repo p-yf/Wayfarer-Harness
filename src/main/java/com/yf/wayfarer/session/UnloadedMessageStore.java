@@ -89,6 +89,26 @@ public final class UnloadedMessageStore {
     }
 
     /**
+     * 把源会话的全部卸载内容复制到目标会话，保留原 uuid，
+     * 使 fork、clone 出来的会话中已有的占位符仍能解析到原文。
+     */
+    public synchronized void copyAll(String fromSessionId, String toSessionId) {
+        requireSession(fromSessionId);
+        requireSession(toSessionId);
+        List<UnloadedMessage> all = messages(fromSessionId);
+        if (all.isEmpty()) {
+            return;
+        }
+        try {
+            Files.createDirectories(root);
+            Files.writeString(file(toSessionId), serialize(all), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
      * 删除会话的全部卸载内容，会话被删除时调用。
      */
     public synchronized void deleteAll(String sessionId) {
@@ -120,6 +140,18 @@ public final class UnloadedMessageStore {
     }
 
     private void rewrite(String sessionId, List<UnloadedMessage> messages) {
+        try {
+            Files.writeString(file(sessionId), serialize(messages), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * 把若干条卸载记录拼成文件内容，每行后带换行。
+     */
+    private String serialize(List<UnloadedMessage> messages) {
         StringBuilder content = new StringBuilder();
         for (UnloadedMessage message : messages) {
             try {
@@ -128,12 +160,7 @@ public final class UnloadedMessageStore {
                 throw new UncheckedIOException(e);
             }
         }
-        try {
-            Files.writeString(file(sessionId), content.toString(), StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        return content.toString();
     }
 
     private Path file(String sessionId) {

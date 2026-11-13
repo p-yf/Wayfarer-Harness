@@ -161,12 +161,15 @@ public class OpenAIChatModel implements ChatModel {
 
     /**
      * 构造 assistant 回放消息：内容、思考内容与工具调用。
-     * DeepSeek V4 思考模式要求含工具调用的 assistant 消息必须回传 reasoning_content，否则 400。
+     * DeepSeek V4 思考模式要求含工具调用的 assistant 消息必须回传 reasoning_content，否则 400；
+     * 纯文本轮次不回传，既避免多余 token，也符合供应商预期。
+     * 记忆层始终保留完整思考内容用于落盘，这里只决定回放报文的形态。
      */
     private static ChatCompletionAssistantMessageParam toAssistantMessage(ChatMessage message) {
         ChatCompletionAssistantMessageParam.Builder assistant = ChatCompletionAssistantMessageParam.builder()
                 .content(message.content());
-        if (message.reasoningContent() != null && !message.reasoningContent().isBlank()) {
+        if (!message.toolCalls().isEmpty()
+                && message.reasoningContent() != null && !message.reasoningContent().isBlank()) {
             assistant.putAdditionalProperty("reasoning_content", JsonValue.from(message.reasoningContent()));
         }
         for (ToolCallInfo info : message.toolCalls()) {
@@ -274,12 +277,27 @@ public class OpenAIChatModel implements ChatModel {
 
         private static Usage toUsage(CompletionUsage value) {
             Map<String, JsonValue> extra = value._additionalProperties();
+            // 缓存命中：DeepSeek 用 prompt_cache_hit_tokens，OpenAI 兼容网关放在 prompt_tokens_details.cached_tokens
+            Long hit = extraLong(extra, "prompt_cache_hit_tokens");
+            if (hit == null) {
+                hit = value.promptTokensDetails()
+                        .flatMap(CompletionUsage.PromptTokensDetails::cachedTokens)
+                        .orElse(null);
+            }
+            Long miss = extraLong(extra, "prompt_cache_miss_tokens");
+            if (miss == null && hit != null && value.promptTokens() > 0) {
+                miss = Math.max(0, value.promptTokens() - hit);
+            }
+            Long reasoning = value.completionTokensDetails()
+                    .flatMap(CompletionUsage.CompletionTokensDetails::reasoningTokens)
+                    .orElse(null);
             return new Usage(
                     value.promptTokens(),
                     value.completionTokens(),
                     value.totalTokens(),
-                    extraLong(extra, "prompt_cache_hit_tokens"),
-                    extraLong(extra, "prompt_cache_miss_tokens"));
+                    hit,
+                    miss,
+                    reasoning);
         }
 
         private static Long extraLong(Map<String, JsonValue> extra, String key) {
@@ -299,9 +317,10 @@ public class OpenAIChatModel implements ChatModel {
         private final StringBuilder arguments = new StringBuilder();
 
         void merge(ChatCompletionChunk.Choice.Delta.ToolCall call) {
-            call.id().ifPresent(value -> id = value);
+            // 首片携带 id 与工具名，后续分片只追加参数且把 id、name 传成空串，空值不能覆盖已有值
+            call.id().filter(value -> !value.isBlank()).ifPresent(value -> id = value);
             call.function().ifPresent(function -> {
-                function.name().ifPresent(value -> name = value);
+                function.name().filter(value -> !value.isBlank()).ifPresent(value -> name = value);
                 function.arguments().ifPresent(arguments::append);
             });
         }

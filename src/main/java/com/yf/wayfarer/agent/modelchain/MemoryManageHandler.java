@@ -4,10 +4,7 @@ import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.loop.ChainHandler;
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.ModelResponse;
-import com.yf.wayfarer.toolcall.ToolCallInfo;
 import reactor.core.publisher.Mono;
-
-import java.util.List;
 
 /**
  * 记忆管理处理器。
@@ -30,10 +27,10 @@ public class MemoryManageHandler implements ChainHandler {
             if (response == null) {
                 return;
             }
-            List<ToolCallInfo> toolCalls = response.toolCalls();
-            // DeepSeek V4 思考模式：含工具调用时必须回传 reasoning_content，纯文本轮次不回传
-            String reasoning = toolCalls.isEmpty() ? null : response.reasoningContent();
-            context.messages().add(ChatMessage.assistant(response.content(), reasoning, toolCalls));
+            // 记忆即记录：思考内容一律完整保留，会话落盘与历史回放都依赖它。
+            // 是否回传给模型属于供应商报文细节，由模型适配器按工具调用情况决定。
+            context.messages().add(ChatMessage.assistant(response.content(),
+                    response.reasoningContent(), response.toolCalls()));
         }).then(next);
     }
 }

@@ -72,6 +72,11 @@ public final class AgentContext implements ToolContext {
     public static final String AGENT_NAME = "agentName";
 
     /**
+     * 工作区目录，由调用方在运行前写入，文件类工具的相对路径基于它解析。
+     */
+    public static final String WORKSPACE = "workspace";
+
+    /**
      * 正在执行的工具调用 id，由工具链在调用每个工具前写入，工具据此找到自己的 HITL 等待项。
      */
     public static final String TOOL_CALL_ID = "toolCallId";

@@ -1,8 +1,11 @@
 package com.yf.wayfarer.web;
 
+import com.yf.wayfarer.message.AgentMessage;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -25,6 +28,8 @@ import java.util.Map;
 @RequestMapping("/api/agent")
 public class AgentController {
 
+    private static final Logger log = LoggerFactory.getLogger(AgentController.class);
+
     private final AgentService agentService;
 
     public AgentController(AgentService agentService) {
@@ -46,7 +51,21 @@ public class AgentController {
         if (agentService.isRunning(sessionId)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "会话正在运行：" + sessionId);
         }
-        return agentService.stream(payload).concatMap(SseEvents::of);
+        Flux<AgentMessage> stream;
+        try {
+            stream = agentService.stream(payload);
+        } catch (RuntimeException e) {
+            // 构建阶段（如未配置模型）的异常不会进入流，需在此记录
+            log.error("启动运行失败 sessionId={}", sessionId, e);
+            throw e;
+        }
+        return stream
+                .concatMap(SseEvents::of)
+                // 流提交后抛出的异常无法再改写 http 状态，转成一条事件，避免连接被直接掐断
+                .onErrorResume(error -> {
+                    log.error("流式运行失败 sessionId={}", sessionId, error);
+                    return Flux.just(SseEvents.error(error));
+                });
     }
 
     /**

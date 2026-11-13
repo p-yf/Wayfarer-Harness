@@ -6,6 +6,9 @@ import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.ModelConfig;
 import com.yf.wayfarer.model.openai.OpenAIChatModel;
+import com.yf.wayfarer.session.JSONMsgType;
+import com.yf.wayfarer.session.JsonlSession;
+import com.yf.wayfarer.session.SessionMessage;
 import com.yf.wayfarer.session.UnloadedMessageStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -180,6 +183,31 @@ class MemoryCompressTest {
         ChatMessage current = messages.get(messages.size() - 1);
         assertTrue(current.content().contains("<sys-unloaded-"), "本轮消息也应被卸载：" + current.content());
         assertEquals(1, store.ids(SESSION).size());
+    }
+
+    @Test
+    void 压缩结果写成快照供下次运行复用() {
+        JsonlSession session = new JsonlSession(root.resolve("sessions"));
+        String sessionId = session.create("压缩快照");
+        AgentContext context = new AgentContext();
+        context.put(AgentContext.SESSION_ID, sessionId);
+        context.put(AgentContext.SESSION, session);
+        context.put(AgentContext.TRACE_ID, "turn-2");
+        context.put(AgentContext.MESSAGES, new ArrayList<>(List.of(
+                new ChatMessage(ChatMessage.Role.USER, "a".repeat(3000)),
+                new ChatMessage(ChatMessage.Role.USER, "b".repeat(3000)))));
+
+        run(handler(1000, 0.9, 0.9, 0.5, 100), context);
+
+        List<SessionMessage> stored = session.messages(sessionId);
+        assertTrue(stored.stream().anyMatch(message -> message.type() == JSONMsgType.COMPACT),
+                "压缩结果应写入 COMPACT 快照，否则下一轮又被完整历史覆盖");
+
+        AgentContext restored = new AgentContext();
+        session.restore(sessionId, restored);
+        assertEquals(ChatMessage.Role.SYSTEM, restored.messages().get(0).role(),
+                "下次运行应以压缩快照为基线");
+        assertTrue(restored.messages().get(0).content().contains("压缩后的要点"));
     }
 
     @Test

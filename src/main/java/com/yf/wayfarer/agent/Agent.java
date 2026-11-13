@@ -2,6 +2,7 @@ package com.yf.wayfarer.agent;
 
 import com.yf.wayfarer.agent.modelchain.*;
 import com.yf.wayfarer.agent.toolchain.ToolCallHandler;
+import com.yf.wayfarer.agent.toolchain.ToolCircleCheckHandler;
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.loop.Chain;
 import com.yf.wayfarer.loop.Loop;
@@ -38,14 +39,16 @@ public class Agent extends Loop {
                  Integer maxTurns, Session session, UnloadedMessageStore unloadedStore,
                  MemoryCompactConfig compact) {
         super(Chain.of(
-                        // 模型链：用户请求落盘 → 记忆压缩 → 步骤持久化 → 模型调用 → 记忆回写
+                        // 模型链：用户请求落盘 → 记忆压缩 → 步骤持久化 → 调用记录 → 模型调用 → 记忆回写
                         new UserQueryPersistHandler(),
                         new MemoryCompressHandler(model, unloadedStore, compact),
                         new AssistantAndToolCallPersistHandler(),
+                        new TraceRecordHandler(),
                         new ModelHandler(model, tools),
                         new MemoryManageHandler()),
-                // 工具链：步骤持久化包裹工具执行，负责工具结果落盘
-                Chain.of(new AssistantAndToolCallPersistHandler(), new ToolCallHandler(toolCall)), maxTurns);
+                // 工具链：重复调用检查 → 步骤持久化包裹工具执行，负责工具结果落盘
+                Chain.of(new ToolCircleCheckHandler(),
+                        new AssistantAndToolCallPersistHandler(), new ToolCallHandler(toolCall)), maxTurns);
         this.session = session;
     }
 

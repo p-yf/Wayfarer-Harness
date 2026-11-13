@@ -2,6 +2,7 @@ package com.yf.wayfarer.web;
 
 import com.yf.wayfarer.agent.Agent;
 import com.yf.wayfarer.agent.modelchain.MemoryCompactConfig;
+import com.yf.wayfarer.agent.toolchain.CodingTools;
 import com.yf.wayfarer.agent.toolchain.PlanTools;
 import com.yf.wayfarer.agent.toolchain.UnloadTools;
 import com.yf.wayfarer.config.ConfigStore;
@@ -15,6 +16,8 @@ import com.yf.wayfarer.session.UnloadedMessageStore;
 import com.yf.wayfarer.toolcall.ToolCall;
 import com.yf.wayfarer.toolcall.ToolDefinition;
 import org.reactivestreams.Subscription;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -32,6 +35,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Service
 public class AgentService {
+
+    private static final Logger log = LoggerFactory.getLogger(AgentService.class);
 
     private final Session session;
     private final UnloadedMessageStore unloadedStore;
@@ -104,9 +109,16 @@ public class AgentService {
             context.put(AgentContext.SYSTEM_PROMPT, systemPrompt);
         }
 
+        log.info("运行开始 sessionId={} agentName={} workspace={} 提示词长度={}",
+                sessionId, agentName, text(payload.get(AgentContext.WORKSPACE)),
+                systemPrompt == null ? 0 : systemPrompt.length());
+
         return buildAgent().stream(context)
                 .doOnSubscribe(subscription -> running.put(sessionId, subscription))
-                .doFinally(signal -> running.remove(sessionId));
+                .doFinally(signal -> {
+                    running.remove(sessionId);
+                    log.info("运行结束 sessionId={} 信号={}", sessionId, signal);
+                });
     }
 
     /**
@@ -130,7 +142,8 @@ public class AgentService {
      */
     private Agent buildAgent() {
         ToolCall toolCall = new ToolCall();
-        List<ToolDefinition> tools = toolCall.parse(new UnloadTools(unloadedStore), new PlanTools());
+        List<ToolDefinition> tools = toolCall.parse(new UnloadTools(unloadedStore), new PlanTools(),
+                new CodingTools());
         return new Agent(chatModel(modelConfig()), tools, toolCall, maxTurns,
                 session, unloadedStore, compactConfig());
     }

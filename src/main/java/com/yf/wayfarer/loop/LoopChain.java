@@ -10,18 +10,18 @@ import java.util.List;
  * @author yyf
  * @description 按 sort 升序稳定排序后同步执行，每个处理器通过调用 next 放行到后续处理器
  */
-public final class Chain {
+public final class LoopChain {
 
     private final List<ChainHandler> handlers;
 
-    private Chain(List<ChainHandler> handlers) {
+    private LoopChain(List<ChainHandler> handlers) {
         this.handlers = List.copyOf(handlers);
     }
 
-    public static Chain of(ChainHandler... handlers) {
+    public static LoopChain of(ChainHandler... handlers) {
         List<ChainHandler> sorted = new ArrayList<>(List.of(handlers));
         sorted.sort(Comparator.comparingInt(ChainHandler::sort));
-        return new Chain(sorted);
+        return new LoopChain(sorted);
     }
 
     public void run(AgentContext context) {

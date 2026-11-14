@@ -1,6 +1,6 @@
 package com.yf.wayfarer.web;
 
-import com.yf.wayfarer.agent.modelchain.MemoryCompactConfig;
+import com.yf.wayfarer.loop.modelchain.MemoryCompactConfig;
 import com.yf.wayfarer.config.ConfigStore;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -35,7 +35,7 @@ public class MemoryCompactConfigController {
     }
 
     @GetMapping("/{name}")
-    public MemoryCompactConfig read(@PathVariable String name) {
+    public MemoryCompactConfig read(@PathVariable("name") String name) {
         return store.read(name);
     }
 
@@ -43,13 +43,13 @@ public class MemoryCompactConfigController {
      * 新建或覆盖指定名称的配置。
      */
     @PutMapping("/{name}")
-    public MemoryCompactConfig save(@PathVariable String name, @RequestBody MemoryCompactConfig config) {
+    public MemoryCompactConfig save(@PathVariable("name") String name, @RequestBody MemoryCompactConfig config) {
         store.save(name, config);
         return config;
     }
 
     @DeleteMapping("/{name}")
-    public Map<String, Object> delete(@PathVariable String name) {
+    public Map<String, Object> delete(@PathVariable("name") String name) {
         boolean deleted = store.delete(name);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("name", name);

@@ -1,6 +1,7 @@
 package com.yf.wayfarer.agent.modelchain;
 
 import com.yf.wayfarer.loop.AgentContext;
+import com.yf.wayfarer.loop.modelchain.TraceRecordHandler;
 import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.FinishReason;
 import com.yf.wayfarer.model.ModelResponse;
@@ -11,8 +12,6 @@ import com.yf.wayfarer.session.Session;
 import com.yf.wayfarer.session.SessionMessage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import reactor.core.publisher.Mono;
-import reactor.test.StepVerifier;
 
 import java.nio.file.Path;
 import java.util.ArrayList;

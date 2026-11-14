@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -34,8 +35,18 @@ public final class ChangeRecorder {
 
     private final ShadowRepositoryStore store;
 
+    /**
+     * 查询服务，仅用于轮次结束时汇总本轮变更；单元测试可以只传 store。
+     */
+    private final ChangeService changeService;
+
     public ChangeRecorder(ShadowRepositoryStore store) {
+        this(store, null);
+    }
+
+    public ChangeRecorder(ShadowRepositoryStore store, ChangeService changeService) {
         this.store = store;
+        this.changeService = changeService;
     }
 
     /**
@@ -105,6 +116,37 @@ public final class ChangeRecorder {
         } catch (RuntimeException e) {
             log.warn("变更记录失败 traceId={} 工具={}", context.traceId(), snapshot.info().name(), e);
             notifyFailure(context, e);
+        }
+    }
+
+    /**
+     * 轮次结束时的整体变更消息。
+     *
+     * <p>运行结束后由 Agent 追加到 SSE 流末尾，页面据此直接渲染「文件变更气泡」，
+     * 不需要再发一次查询请求。没有变更时返回 null，不推送空事件。</p>
+     */
+    public AgentMessage summary(AgentContext context) {
+        if (!store.enabled() || changeService == null || context == null) {
+            return null;
+        }
+        String sessionId = context.sessionId();
+        String traceId = context.traceId();
+        if (sessionId == null || traceId == null) {
+            return null;
+        }
+        try {
+            List<Map<String, Object>> entries = changeService.list(sessionId, traceId, 200);
+            if (entries.isEmpty()) {
+                return null;
+            }
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("type", "changes");
+            data.put("traceId", traceId);
+            data.put("entries", entries);
+            return new AgentMessage.Other(traceId, data);
+        } catch (RuntimeException e) {
+            log.warn("汇总本轮变更失败 traceId={}", traceId, e);
+            return null;
         }
     }
 

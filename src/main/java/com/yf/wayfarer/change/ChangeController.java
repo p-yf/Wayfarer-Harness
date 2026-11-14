@@ -31,9 +31,9 @@ public class ChangeController {
      * 变更列表，新的在前。sessionId 为空时返回全部会话的记录。
      */
     @GetMapping
-    public List<Map<String, Object>> list(@RequestParam(required = false) String sessionId,
-                                          @RequestParam(required = false) String traceId,
-                                          @RequestParam(defaultValue = "50") int limit) {
+    public List<Map<String, Object>> list(@RequestParam(name = "sessionId", required = false) String sessionId,
+                                          @RequestParam(name = "traceId", required = false) String traceId,
+                                          @RequestParam(name = "limit", defaultValue = "50") int limit) {
         return changeService.list(sessionId, traceId, limit);
     }
 
@@ -41,8 +41,8 @@ public class ChangeController {
      * 某次变更的 unified diff，path 为空时返回本次提交全部文件的补丁。
      */
     @GetMapping("/{commitId}/diff")
-    public Map<String, Object> diff(@PathVariable String commitId,
-                                    @RequestParam(required = false) String path) {
+    public Map<String, Object> diff(@PathVariable("commitId") String commitId,
+                                    @RequestParam(name = "path", required = false) String path) {
         return changeService.diff(commitId, path);
     }
 
@@ -50,7 +50,7 @@ public class ChangeController {
      * 撤销某次变更；请求体传 path 时只撤销该文件，不传则撤销整次工具调用。
      */
     @PostMapping("/{commitId}/revert")
-    public Map<String, Object> revert(@PathVariable String commitId,
+    public Map<String, Object> revert(@PathVariable("commitId") String commitId,
                                       @RequestBody(required = false) Map<String, Object> body) {
         Object path = body == null ? null : body.get("path");
         return changeService.revert(commitId, path == null ? null : String.valueOf(path));

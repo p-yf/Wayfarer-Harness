@@ -3,6 +3,8 @@ package com.yf.wayfarer.agent.modelchain;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.yf.wayfarer.loop.AgentContext;
+import com.yf.wayfarer.loop.modelchain.MemoryCompactConfig;
+import com.yf.wayfarer.loop.modelchain.MemoryCompressHandler;
 import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.ModelConfig;
@@ -15,7 +17,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import reactor.core.publisher.Mono;
 
 import java.io.IOException;
 import java.io.OutputStream;

@@ -117,6 +117,16 @@
     skillWrite: (path, content) => request("PUT", "/api/skills/file", { path: path, content: content }),
     skillMkdir: (path) => request("POST", "/api/skills/dir", { path: path }),
     skillDelete: (path) => request("DELETE", "/api/skills/entry?path=" + encodeURIComponent(path)),
+    // 变更记录：sessionId/traceId 为空表示不按该维度过滤
+    listChanges: (sessionId, traceId, limit) => {
+      const query = [];
+      if (sessionId) query.push("sessionId=" + encodeURIComponent(sessionId));
+      if (traceId) query.push("traceId=" + encodeURIComponent(traceId));
+      if (limit) query.push("limit=" + limit);
+      return request("GET", "/api/changes" + (query.length ? "?" + query.join("&") : ""));
+    },
+    changeDiff: (commitId, path) =>
+      request("GET", "/api/changes/" + encodeURIComponent(commitId) + "/diff?path=" + encodeURIComponent(path)),
     streamAgent: streamAgent
   };
 })();

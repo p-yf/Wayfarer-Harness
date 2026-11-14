@@ -1,7 +1,5 @@
-package com.yf.wayfarer.agent;
+package com.yf.wayfarer.loop;
 
-import com.yf.wayfarer.loop.AgentContext;
-import com.yf.wayfarer.loop.ChainHandler;
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.session.JSONMsgType;
 import com.yf.wayfarer.session.Session;

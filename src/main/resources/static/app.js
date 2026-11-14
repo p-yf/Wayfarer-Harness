@@ -19,6 +19,10 @@
     // 已经提醒过的待确认项，避免轮询重复响铃
     hitlIds: new Set(),
     tab: "model",
+    // 右侧面板：一次只显示一个视图，changes 视图带当前轮次与数据
+    panel: { open: false, view: "settings", traceId: null, entries: [], expanded: new Set(), patches: new Map() },
+    // 已展开的变更气泡（按 traceId 记录），重渲染后保持展开状态
+    changeBubbleOpen: new Set(),
     modelConfigs: {},
     compactConfigs: {},
     prompts: [],
@@ -41,7 +45,16 @@
   /** 会话视图：块列表、工具入参、运行状态与流式订阅，按会话隔离 */
   function viewOf(sessionId) {
     return state.views[sessionId] ||
-      (state.views[sessionId] = { blocks: [], metadata: {}, running: false, loading: null, abort: null });
+      (state.views[sessionId] = {
+        blocks: [],
+        metadata: {},
+        running: false,
+        loading: null,
+        abort: null,
+        // traceId -> 聚合后的文件变更摘要；traceId -> 原始提交条目
+        changeSummary: {},
+        changeEntries: {}
+      });
   }
 
   function currentView() {
@@ -271,6 +284,8 @@
    */
   async function openSession(id, forceReload) {
     if (id === state.currentId && !forceReload) return;
+    // 变更面板属于上一个会话的轮次，切换会话时收起，避免展示错数据
+    if (state.panel.view === "changes") closePanel();
     state.currentId = id;
     const view = viewOf(id);
     renderSessions();
@@ -292,11 +307,17 @@
 
   async function loadHistory(id) {
     try {
-      const [meta, messages] = await Promise.all([Api.sessionMeta(id), Api.sessionMessages(id)]);
+      const [meta, messages, changes] = await Promise.all([
+        Api.sessionMeta(id),
+        Api.sessionMessages(id),
+        // 变更记录是历史渲染的一部分：拿不到时按无变更处理，不影响对话
+        Api.listChanges(id, null, 200).catch(() => [])
+      ]);
       const view = viewOf(id);
       // 历史还没返回就开跑了，以实时视图为准，避免覆盖本轮输出
       if (view.running) return;
-      view.blocks = historyToBlocks(messages);
+      applyChangeEntries(view, changes);
+      view.blocks = historyToBlocks(messages, view.changeSummary);
       view.metadata = (meta && meta.metadata) || {};
       if (state.currentId !== id) return;
       applyViewMeta(view);
@@ -514,7 +535,7 @@
     return "";
   }
 
-  function historyToBlocks(messages) {
+  function historyToBlocks(messages, changeSummary) {
     const blocks = [];
     const toolsById = {};
     const headTraces = new Set();
@@ -570,7 +591,29 @@
         delete toolStart[msg.traceId];
       }
     }
+    appendChangeBlocks(blocks, changeSummary);
     return blocks;
+  }
+
+  /**
+   * 历史渲染时把变更气泡插到每轮最后一个块之后。
+   * 先算好插入位置再倒序插入，避免前面的插入导致后面下标错位。
+   */
+  function appendChangeBlocks(blocks, changeSummary) {
+    const insertions = [];
+    for (const [traceId, summary] of Object.entries(changeSummary || {})) {
+      if (!summary || !summary.files.length) continue;
+      let last = -1;
+      blocks.forEach((block, index) => {
+        if (block.traceId === traceId) last = index;
+      });
+      if (last >= 0) {
+        insertions.push({ index: last + 1, block: { kind: "change", traceId, summary } });
+      }
+    }
+    insertions
+      .sort((left, right) => right.index - left.index)
+      .forEach((item) => blocks.splice(item.index, 0, item.block));
   }
 
   /**
@@ -730,6 +773,23 @@
           (prompt ? "/" + prompt : "") + (rate != null ? " (" + rate + "%)" : ""));
       }
       el.textContent = parts.join(" · ");
+    } else if (block.kind === "change") {
+      // 本轮文件变更气泡：主体点击就地展开文件清单，右侧箭头打开详情面板
+      el.className = "change-hold";
+      el.innerHTML = '<div class="change-bubble">' + changeBubbleHtml(block.summary, block.traceId) + "</div>";
+      const bubble = el.querySelector(".change-bubble");
+      if (state.changeBubbleOpen.has(block.traceId)) {
+        bubble.classList.add("open");
+      }
+      bubble.querySelector(".change-bubble-main").addEventListener("click", () => {
+        const open = bubble.classList.toggle("open");
+        if (open) state.changeBubbleOpen.add(block.traceId);
+        else state.changeBubbleOpen.delete(block.traceId);
+      });
+      bubble.querySelectorAll(".change-bubble-file").forEach((row) => {
+        row.addEventListener("click", () => openChangeFile(block.traceId, row.dataset.path));
+      });
+      bubble.querySelector(".change-bubble-open").addEventListener("click", () => openChangePanel(block.traceId));
     } else if (block.kind === "other") {
       if (typeof block.data === "string") {
         el.className = block.data.indexOf("出错") === 0 ? "notice error" : "notice";
@@ -882,9 +942,13 @@
         }
       }
     } else if (name === "other") {
-      // 压缩等内部事件用提示条展示，其余非字符串负载忽略
+      // 内部事件：压缩提示、本轮整体变更、变更记录失败提示
       if (data && typeof data === "object" && data.type === "compact") {
         pushBlock(view, { kind: "compact" });
+      } else if (data && typeof data === "object" && data.type === "changes") {
+        applyChangesEvent(view, data);
+      } else if (data && typeof data === "object" && data.type === "change-error") {
+        toast(data.message || "变更记录失败", true);
       } else if (typeof data === "string") {
         pushBlock(view, { kind: "other", data: data });
       }
@@ -1111,30 +1175,40 @@
     inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + "px";
   }
 
+  const PANEL_TITLES = { settings: "设置", prompt: "系统提示词", skills: "Skills", changes: "本轮变更" };
+
   /**
-   * 打开右侧面板：model/compact 是设置页，prompt/skills 从侧边栏直接进入。
+   * 打开右侧面板。view 决定内容，payload 携带 changes 视图需要的 traceId 与条目。
    */
-  function openDrawer(tab) {
-    state.tab = tab || "model";
+  function openPanel(view, payload) {
+    state.panel.view = view || "settings";
+    if (payload && payload.traceId) state.panel.traceId = payload.traceId;
+    if (payload && payload.entries) state.panel.entries = payload.entries;
     state.editing = null;
     state.promptEditing = null;
     resetSkillBrowser();
-    $("drawer").classList.remove("hidden");
-    $("drawerMask").classList.remove("hidden");
-    const standalone = state.tab === "prompt" || state.tab === "skills";
-    $("drawerTitle").textContent = { prompt: "系统提示词", skills: "Skills" }[state.tab] || "设置";
-    $("drawerTabs").classList.toggle("hidden", standalone);
-    document.querySelectorAll(".tab").forEach((item) => {
+    $("panelTitle").textContent = PANEL_TITLES[state.panel.view] || "设置";
+    $("panelTabs").classList.toggle("hidden", state.panel.view !== "settings");
+    document.querySelectorAll("#panelTabs .tab").forEach((item) => {
       item.classList.toggle("active", item.dataset.tab === state.tab);
     });
-    loadConfigs();
+    setPanelOpen(true);
+    loadPanel();
   }
 
-  function closeDrawer() {
-    $("drawer").classList.add("hidden");
-    $("drawerMask").classList.add("hidden");
-    state.editing = null;
-    resetSkillBrowser();
+  function closePanel() {
+    setPanelOpen(false);
+  }
+
+  /**
+   * 顶栏设置按钮：已展开设置则收起；停在其它视图则切回设置；收起时直接展开设置。
+   */
+  function toggleSettingsPanel() {
+    if (state.panel.open && state.panel.view === "settings") {
+      closePanel();
+      return;
+    }
+    openPanel("settings");
   }
 
   function resetSkillBrowser() {
@@ -1145,21 +1219,25 @@
     state.skillCreating = null;
   }
 
-  async function loadConfigs() {
+  /**
+   * 按当前面板视图加载数据，加载完统一交给 renderPanel 分发。
+   */
+  async function loadPanel() {
     try {
-      if (state.tab === "model") {
-        state.modelConfigs = await Api.listModelConfigs();
-      } else if (state.tab === "compact") {
-        state.compactConfigs = await Api.listCompactConfigs();
-      } else if (state.tab === "skills") {
+      if (state.panel.view === "settings") {
+        if (state.tab === "model") state.modelConfigs = await Api.listModelConfigs();
+        else state.compactConfigs = await Api.listCompactConfigs();
+      } else if (state.panel.view === "prompt") {
+        state.prompts = await Api.listPrompts(AGENT_NAME);
+      } else if (state.panel.view === "skills") {
         const tree = await Api.skillTree(state.skillPath);
         state.skillPath = tree.path || "";
         state.skillParent = tree.parent;
         state.skillEntries = tree.entries || [];
-      } else {
-        state.prompts = await Api.listPrompts(AGENT_NAME);
+      } else if (state.panel.view === "changes" && !state.panel.entries.length) {
+        state.panel.entries = await Api.listChanges(state.currentId, state.panel.traceId, 200);
       }
-      renderDrawer();
+      renderPanel();
     } catch (e) {
       toast(e.message, true);
     }
@@ -1207,18 +1285,31 @@
       : { contextWindow: 128000, triggerRatio: 0.7, toolRatio: 0.01, messageRatio: 0.02, compressRatio: 0.5, keepChars: 100, enabled: true };
   }
 
-  function renderDrawer() {
-    if (state.tab === "prompt") {
+  /**
+   * 面板渲染分发：设置页有自己的页签，其余视图各自渲染。
+   */
+  function renderPanel() {
+    if (state.panel.view === "prompt") {
       renderPrompts();
       return;
     }
-    if (state.tab === "skills") {
+    if (state.panel.view === "skills") {
       renderSkills();
       return;
     }
+    if (state.panel.view === "changes") {
+      renderChanges();
+      return;
+    }
+    renderSettings($("panelBody"));
+  }
+
+  /**
+   * 设置页：模型配置与记忆压缩共用一套表单结构，按 state.tab 区分。
+   */
+  function renderSettings(body) {
     const isModel = state.tab === "model";
     const configs = isModel ? state.modelConfigs : state.compactConfigs;
-    const body = $("drawerBody");
     const names = Object.keys(configs || {}).sort();
     let html =
       '<div class="cfg-note">' +
@@ -1228,7 +1319,7 @@
       '</div><div class="cfg-toolbar"><span class="cfg-note" style="margin:0">共 ' + names.length + ' 个配置</span>' +
       '<button class="cfg-new" id="cfgNew">＋ 新建配置</button></div>';
 
-    if (!names.length) html += '<div class="drawer-empty">暂无配置，点击「新建配置」创建</div>';
+    if (!names.length) html += '<div class="panel-empty">暂无配置，点击「新建配置」创建</div>';
     body.innerHTML = html;
 
     for (const name of names) {
@@ -1245,7 +1336,7 @@
         '<div class="cfg-summary">' + esc(summary) + "</div>";
       item.addEventListener("click", () => {
         state.editing = name;
-        renderDrawer();
+        renderSettings(body);
       });
       item.querySelector(".cfg-del").addEventListener("click", async (e) => {
         e.stopPropagation();
@@ -1255,7 +1346,7 @@
           else await Api.deleteCompactConfig(name);
           if (state.editing === name) state.editing = null;
           toast("已删除");
-          await loadConfigs();
+          await loadPanel();
           refreshModelBadge();
         } catch (err) {
           toast(err.message, true);
@@ -1266,7 +1357,7 @@
 
     $("cfgNew").addEventListener("click", () => {
       state.editing = "__new__";
-      renderDrawer();
+      renderSettings(body);
     });
 
     if (state.editing) renderForm(body, isModel);
@@ -1310,7 +1401,7 @@
 
     $("cfgCancel").addEventListener("click", () => {
       state.editing = null;
-      renderDrawer();
+      renderSettings(body);
     });
     $("cfgSave").addEventListener("click", async () => {
       const name = $("f-name").value.trim();
@@ -1333,7 +1424,7 @@
         else await Api.saveCompactConfig(name, payload);
         toast("已保存「" + name + "」");
         state.editing = name;
-        await loadConfigs();
+        await loadPanel();
         refreshModelBadge();
       } catch (e) {
         toast(e.message, true);
@@ -1342,14 +1433,14 @@
   }
 
   function renderPrompts() {
-    const body = $("drawerBody");
+    const body = $("panelBody");
     const prompts = state.prompts || [];
     let html =
       '<div class="cfg-note">系统提示词以「agent名称-提示词名称-顺序.md」保存在 systemprompt 目录，按顺序拼接后作为模型的首条 system 消息。当前 agent：' +
       esc(AGENT_NAME) + "</div>" +
       '<div class="cfg-toolbar"><span class="cfg-note" style="margin:0">共 ' + prompts.length + " 个提示词</span>" +
       '<button class="cfg-new" id="promptNew">＋ 新建提示词</button></div>';
-    if (!prompts.length) html += '<div class="drawer-empty">暂无提示词，点击「新建提示词」创建</div>';
+    if (!prompts.length) html += '<div class="panel-empty">暂无提示词，点击「新建提示词」创建</div>';
     body.innerHTML = html;
 
     for (const prompt of prompts) {
@@ -1374,7 +1465,7 @@
           await Api.deletePrompt(AGENT_NAME, prompt.name, prompt.order);
           if (state.promptEditing === key) state.promptEditing = null;
           toast("已删除");
-          await loadConfigs();
+          await loadPanel();
         } catch (err) {
           toast(err.message, true);
         }
@@ -1436,7 +1527,7 @@
         await Api.savePrompt(AGENT_NAME, name, order, $("p-content").value);
         toast("已保存「" + name + "」");
         state.promptEditing = name + "-" + order;
-        await loadConfigs();
+        await loadPanel();
       } catch (e) {
         toast(e.message, true);
       }
@@ -1454,7 +1545,7 @@
     state.skillPath = path || "";
     state.skillFile = null;
     state.skillCreating = null;
-    await loadConfigs();
+    await loadPanel();
   }
 
   async function openSkillFile(path) {
@@ -1475,7 +1566,7 @@
    * Skills 目录浏览器：面包屑导航、目录/文件列表、新建与文本编辑。
    */
   function renderSkills() {
-    const body = $("drawerBody");
+    const body = $("panelBody");
     const entries = state.skillEntries || [];
     const crumbs = state.skillPath ? state.skillPath.split("/") : [];
     let html =
@@ -1512,12 +1603,12 @@
     }
     if (!entries.length && !state.skillPath) {
       const empty = document.createElement("div");
-      empty.className = "drawer-empty";
+      empty.className = "panel-empty";
       empty.textContent = "skills 目录还是空的，先新建文件夹";
       list.appendChild(empty);
     } else if (!entries.length && state.skillPath) {
       const empty = document.createElement("div");
-      empty.className = "drawer-empty";
+      empty.className = "panel-empty";
       empty.textContent = "空目录";
       list.appendChild(empty);
     }
@@ -1546,7 +1637,7 @@
           await Api.skillDelete(entry.path);
           if (state.skillFile && state.skillFile.path === entry.path) state.skillFile = null;
           toast("已删除");
-          await loadConfigs();
+          await loadPanel();
         } catch (err) {
           toast(err.message, true);
         }
@@ -1591,7 +1682,7 @@
           await Api.skillWrite(path, "");
         }
         state.skillCreating = null;
-        await loadConfigs();
+        await loadPanel();
         if (kind === "file") await openSkillFile(path);
       } catch (e) {
         toast(e.message, true);
@@ -1628,9 +1719,374 @@
     });
   }
 
+  /* ---------------- 三栏布局：折叠、拖拽与持久化 ---------------- */
+
+  const LAYOUT = {
+    sidebar: { min: 200, max: 420, fallback: 264, key: "wayfarer-sidebar-width" },
+    panel: { min: 320, max: 720, fallback: 460, key: "wayfarer-panel-width" }
+  };
+
+  function isMobile() {
+    return window.innerWidth <= 900;
+  }
+
+  function storedWidth(key, fallback) {
+    const value = Number(localStorage.getItem(key));
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+  }
+
+  /** 宽度写进 CSS 变量，两个栏位共用同一套夹取逻辑 */
+  function applyWidth(kind, width) {
+    const spec = LAYOUT[kind];
+    const clamped = Math.max(spec.min, Math.min(spec.max, Math.round(width)));
+    document.documentElement.style.setProperty("--" + kind + "-width", clamped + "px");
+    return clamped;
+  }
+
+  function setSidebarCollapsed(collapsed) {
+    $("sidebar").classList.toggle("collapsed", collapsed);
+    $("sidebarResizer").classList.toggle("hidden", collapsed);
+    $("sidebarToggle").setAttribute("aria-expanded", String(!collapsed));
+    localStorage.setItem("wayfarer-sidebar-collapsed", collapsed ? "1" : "0");
+  }
+
+  function setPanelOpen(open) {
+    state.panel.open = open;
+    $("panel").classList.toggle("collapsed", !open);
+    $("panelResizer").classList.toggle("hidden", !open);
+    // 桌面端面板在文档流内，不需要遮罩；移动端才用遮罩
+    $("panelMask").classList.toggle("hidden", !open || !isMobile());
+    $("settingsBtn").setAttribute("aria-expanded", String(open));
+    localStorage.setItem("wayfarer-panel-collapsed", open ? "0" : "1");
+  }
+
+  function toggleSidebar() {
+    if (isMobile()) {
+      $("sidebar").classList.toggle("open");
+      return;
+    }
+    setSidebarCollapsed(!$("sidebar").classList.contains("collapsed"));
+  }
+
+  /**
+   * 拖拽调宽：edge 表示手柄位于哪一侧。
+   * 左边界用指针 X 减去容器左边距；右边界用容器右边距减去指针 X。
+   */
+  function bindResizer(id, kind, edge) {
+    const handle = $(id);
+    handle.addEventListener("pointerdown", (event) => {
+      if (isMobile()) return;
+      event.preventDefault();
+      handle.setPointerCapture(event.pointerId);
+      document.body.classList.add("is-resizing");
+      let width = 0;
+      const onMove = (moveEvent) => {
+        const rect = $("shell").getBoundingClientRect();
+        width = applyWidth(kind, edge === "left" ? moveEvent.clientX - rect.left : rect.right - moveEvent.clientX);
+      };
+      const onUp = (upEvent) => {
+        handle.removeEventListener("pointermove", onMove);
+        handle.removeEventListener("pointerup", onUp);
+        document.body.classList.remove("is-resizing");
+        if (handle.hasPointerCapture(upEvent.pointerId)) handle.releasePointerCapture(upEvent.pointerId);
+        if (width) localStorage.setItem(LAYOUT[kind].key, String(width));
+      };
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", onUp);
+    });
+  }
+
+  function initLayout() {
+    const panelFallback = Math.min(520, Math.max(360, Math.round(window.innerWidth * 0.34)));
+    applyWidth("sidebar", storedWidth(LAYOUT.sidebar.key, LAYOUT.sidebar.fallback));
+    applyWidth("panel", storedWidth(LAYOUT.panel.key, panelFallback));
+    setSidebarCollapsed(localStorage.getItem("wayfarer-sidebar-collapsed") === "1");
+    bindResizer("sidebarResizer", "sidebar", "left");
+    bindResizer("panelResizer", "panel", "right");
+
+    // 面板上次是展开的，恢复后直接加载设置内容
+    if (localStorage.getItem("wayfarer-panel-collapsed") === "0") openPanel("settings");
+    else setPanelOpen(false);
+
+    window.addEventListener("resize", () => {
+      $("panelMask").classList.toggle("hidden", !state.panel.open || !isMobile());
+    });
+  }
+
+  /* ---------------- 文件变更：摘要、气泡与 diff ---------------- */
+
+  const CHANGE_TYPE_LABELS = { ADD: "新增", MODIFY: "修改", DELETE: "删除", RENAME: "重命名", COPY: "复制" };
+
+  function changeTypeLabel(type) {
+    return CHANGE_TYPE_LABELS[type] || (type ? String(type).toLowerCase() : "变更");
+  }
+
+  function baseName(path) {
+    const parts = String(path || "").split("/");
+    return parts[parts.length - 1] || path;
+  }
+
+  function isDarkTheme() {
+    return document.body.hasAttribute("data-ds-dark-theme");
+  }
+
+  /** 把一组提交条目聚合成气泡展示需要的形状：调用次数、按路径去重的文件、增删合计 */
+  function summarizeChanges(entries) {
+    const summary = { commits: 0, files: [], insertions: 0, deletions: 0 };
+    const byPath = {};
+    for (const entry of entries || []) {
+      summary.commits++;
+      for (const file of entry.files || []) {
+        const item = byPath[file.path];
+        if (item) {
+          item.insertions += file.insertions || 0;
+          item.deletions += file.deletions || 0;
+          item.changeType = file.changeType || item.changeType;
+        } else {
+          const created = {
+            path: file.path,
+            changeType: file.changeType,
+            insertions: file.insertions || 0,
+            deletions: file.deletions || 0,
+            binary: !!file.binary
+          };
+          byPath[file.path] = created;
+          summary.files.push(created);
+        }
+        summary.insertions += file.insertions || 0;
+        summary.deletions += file.deletions || 0;
+      }
+    }
+    return summary;
+  }
+
+  /** 历史渲染前按 traceId 归档，供气泡与面板共用 */
+  function applyChangeEntries(view, entries) {
+    view.changeEntries = {};
+    view.changeSummary = {};
+    for (const entry of entries || []) {
+      if (!entry.traceId) continue;
+      (view.changeEntries[entry.traceId] = view.changeEntries[entry.traceId] || []).push(entry);
+    }
+    for (const [traceId, list] of Object.entries(view.changeEntries)) {
+      view.changeSummary[traceId] = summarizeChanges(list);
+    }
+  }
+
+  /** 轮次结束推送：更新本轮摘要，已有气泡就地替换，否则追加 */
+  function applyChangesEvent(view, data) {
+    const traceId = data.traceId;
+    const entries = data.entries || [];
+    if (!traceId || !entries.length) return;
+    view.changeEntries[traceId] = entries;
+    view.changeSummary[traceId] = summarizeChanges(entries);
+    const existing = view.blocks.find((block) => block.kind === "change" && block.traceId === traceId);
+    if (existing) {
+      existing.summary = view.changeSummary[traceId];
+      swapBlock(view, existing);
+    } else {
+      pushBlock(view, { kind: "change", traceId, summary: view.changeSummary[traceId] });
+    }
+  }
+
+  /** 增删行数片段：+ 绿色、− 红色，二进制文件单独标注 */
+  function changeStatHtml(file) {
+    if (file.binary) return '<span class="change-bubble-filestat">二进制</span>';
+    return '<span class="change-bubble-filestat">' +
+      '<span class="change-add">+' + file.insertions + "</span> " +
+      '<span class="change-del">−' + file.deletions + "</span></span>";
+  }
+
+  /** 总览气泡：左侧文件图标 + 文件数，右侧增删行数，竖线后的箭头打开详情面板 */
+  function changeBubbleHtml(summary, traceId) {
+    const files = summary.files || [];
+    const rows = files.map((file) =>
+      '<button type="button" class="change-bubble-file" data-path="' + esc(file.path) + '" ' +
+        'data-trace="' + esc(traceId || "") + '">' +
+        '<span class="change-bubble-name">' + esc(baseName(file.path)) + "</span>" +
+        '<span class="change-bubble-path" title="' + esc(file.path) + '">' + esc(file.path) + "</span>" +
+        changeStatHtml(file) +
+      "</button>").join("");
+    return '<div class="change-bubble-head">' +
+      '<button type="button" class="change-bubble-main">' +
+        '<span class="change-bubble-icon">' +
+          '<svg viewBox="0 0 16 16" width="15" height="15">' +
+            '<path d="M4.2 1.8h4.6l2.9 2.9v8.5a1 1 0 0 1-1 1H4.2a1 1 0 0 1-1-1V2.8a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/>' +
+            '<path d="M8.7 2v3h3" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/>' +
+          "</svg>" +
+        "</span>" +
+        '<span class="change-bubble-title">' + files.length + " 个文件已更改</span>" +
+        '<span class="change-bubble-stat"><span class="change-add">+' + summary.insertions + "</span> " +
+          '<span class="change-del">−' + summary.deletions + "</span></span>" +
+      "</button>" +
+      '<button type="button" class="change-bubble-open" title="在右侧面板查看详情">' +
+        '<svg viewBox="0 0 16 16" width="16" height="16">' +
+          '<path d="M4.8 11.2l6.4-6.4M6.2 4.8h5v5" stroke="currentColor" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' +
+        "</svg>" +
+      "</button>" +
+      "</div>" +
+      '<div class="change-bubble-list">' + rows + "</div>";
+  }
+
+  function openChangePanel(traceId) {
+    const view = currentView();
+    state.panel.entries = (view && view.changeEntries[traceId]) || [];
+    state.panel.expanded = new Set();
+    state.panel.patches = new Map();
+    openPanel("changes", { traceId, entries: state.panel.entries });
+  }
+
+  /** 点击气泡里的文件行：打开右侧面板，展开该文件并滚动到它的位置 */
+  function openChangeFile(traceId, path) {
+    const view = currentView();
+    const entries = (view && view.changeEntries[traceId]) || [];
+    const entry = entries.find((item) => (item.files || []).some((file) => file.path === path));
+    openChangePanel(traceId);
+    if (!entry) return;
+    const key = entry.commitId + ":" + path;
+    if (!state.panel.expanded.has(key)) {
+      toggleChangeDiff(entry.commitId, path);
+    }
+    const holder = findChangeFile(key);
+    if (holder) holder.scrollIntoView({ block: "start" });
+  }
+
+  function fileStat(file) {
+    return file.binary ? "二进制" : "+" + file.insertions + " −" + file.deletions;
+  }
+
+  function findChangeFile(key) {
+    return Array.from($("panelBody").querySelectorAll(".change-file"))
+      .find((item) => item.dataset.key === key);
+  }
+
+  function renderChanges() {
+    const body = $("panelBody");
+    const entries = state.panel.entries || [];
+    if (!entries.length) {
+      body.innerHTML = '<div class="panel-empty">本轮没有文件变更</div>';
+      return;
+    }
+
+    const summary = summarizeChanges(entries);
+    let html = '<div class="change-summary">' + summary.commits + " 次调用 · " +
+      summary.files.length + " 个文件 · +" + summary.insertions + " −" + summary.deletions + "</div>";
+
+    for (const entry of entries) {
+      const stat = summarizeChanges([entry]);
+      html += '<div class="change-group"><div class="change-group-head">' +
+        '<span class="change-tool">' + esc(entry.tool || "tool") + "</span>" +
+        '<span class="change-group-title" title="' + esc(entry.summary || "") + '">' + esc(entry.summary || "") + "</span>" +
+        '<span class="change-group-stat">+' + stat.insertions + " −" + stat.deletions + "</span>" +
+        "</div>";
+      for (const file of entry.files || []) {
+        const key = entry.commitId + ":" + file.path;
+        html += '<div class="change-file" data-key="' + esc(key) + '">' +
+          '<button type="button" class="change-file-row" data-commit="' + esc(entry.commitId) +
+          '" data-path="' + esc(file.path) + '">' +
+          '<span class="change-file-path" title="' + esc(file.path) + '">' + esc(file.path) + "</span>" +
+          '<span class="change-badge ' + esc(file.changeType || "") + '">' + esc(changeTypeLabel(file.changeType)) + "</span>" +
+          '<span class="change-file-stat">' + esc(fileStat(file)) + "</span>" +
+          '<span class="change-bubble-arrow">' + (state.panel.expanded.has(key) ? "▾" : "▸") + "</span>" +
+          "</button>" +
+          '<div class="change-diff hidden"></div>' +
+          "</div>";
+      }
+      html += "</div>";
+    }
+    body.innerHTML = html;
+
+    body.querySelectorAll(".change-file-row").forEach((row) => {
+      row.addEventListener("click", () => toggleChangeDiff(row.dataset.commit, row.dataset.path));
+    });
+
+    // 主题切换等场景会重建面板：把已展开的文件恢复展开
+    for (const key of state.panel.expanded) {
+      const holder = findChangeFile(key);
+      if (!holder) continue;
+      const diff = holder.querySelector(".change-diff");
+      const arrow = holder.querySelector(".change-bubble-arrow");
+      diff.classList.remove("hidden");
+      if (arrow) arrow.textContent = "▾";
+      if (state.panel.patches.has(key)) {
+        renderDiff(diff, state.panel.patches.get(key));
+      } else {
+        const separator = key.indexOf(":");
+        loadDiff(key, key.slice(0, separator), key.slice(separator + 1), diff);
+      }
+    }
+  }
+
+  function toggleChangeDiff(commitId, path) {
+    const key = commitId + ":" + path;
+    const holder = findChangeFile(key);
+    if (!holder) return;
+    const diff = holder.querySelector(".change-diff");
+    const arrow = holder.querySelector(".change-bubble-arrow");
+
+    if (state.panel.expanded.has(key)) {
+      state.panel.expanded.delete(key);
+      diff.classList.add("hidden");
+      diff.innerHTML = "";
+      if (arrow) arrow.textContent = "▸";
+      return;
+    }
+
+    state.panel.expanded.add(key);
+    diff.classList.remove("hidden");
+    if (arrow) arrow.textContent = "▾";
+    if (state.panel.patches.has(key)) {
+      renderDiff(diff, state.panel.patches.get(key));
+    } else {
+      loadDiff(key, commitId, path, diff);
+    }
+  }
+
+  /** 按需拉取某个文件的 unified diff，结果缓存避免重复请求 */
+  async function loadDiff(key, commitId, path, container) {
+    container.innerHTML = '<div class="change-note">加载中…</div>';
+    try {
+      const result = await Api.changeDiff(commitId, path);
+      const patch = (result && result.patch) || "";
+      state.panel.patches.set(key, patch);
+      renderDiff(container, patch);
+    } catch (e) {
+      container.innerHTML = '<div class="change-note">' + esc(e.message) + "</div>";
+    }
+  }
+
+  /** diff2html 渲染；依赖缺失或解析失败时退回纯文本 */
+  function renderDiff(container, patch) {
+    if (!patch || !patch.trim()) {
+      container.innerHTML = '<div class="change-note">无文本差异</div>';
+      return;
+    }
+    let text = patch;
+    let note = "";
+    const lines = text.split("\n");
+    if (text.length > 200 * 1024 || lines.length > 3000) {
+      text = lines.slice(0, 2000).join("\n");
+      note = '<div class="change-note">补丁过长，仅展示前 2000 行</div>';
+    }
+    if (window.Diff2Html) {
+      try {
+        container.innerHTML = window.Diff2Html.html(text, {
+          drawFileList: false,
+          matching: "lines",
+          outputFormat: "line-by-line",
+          colorScheme: isDarkTheme() ? "dark" : "light"
+        }) + note;
+        return;
+      } catch (_) {
+        // 解析失败时走下面的纯文本降级
+      }
+    }
+    container.innerHTML = '<pre class="change-raw">' + esc(text) + "</pre>" + note;
+  }
+
   $("newChatBtn").addEventListener("click", createSession);
-  $("promptNavBtn").addEventListener("click", () => openDrawer("prompt"));
-  $("skillsNavBtn").addEventListener("click", () => openDrawer("skills"));
+  $("promptNavBtn").addEventListener("click", () => openPanel("prompt"));
+  $("skillsNavBtn").addEventListener("click", () => openPanel("skills"));
   $("workspaceBtn").addEventListener("click", openWorkspacePicker);
   $("approvalBtn").addEventListener("click", (e) => {
     e.stopPropagation();
@@ -1656,22 +2112,24 @@
   });
   $("sendBtn").addEventListener("click", send);
   $("stopBtn").addEventListener("click", stop);
-  $("settingsBtn").addEventListener("click", () => openDrawer("model"));
-  $("drawerClose").addEventListener("click", closeDrawer);
-  $("drawerMask").addEventListener("click", closeDrawer);
-  $("sidebarToggle").addEventListener("click", () => $("sidebar").classList.toggle("open"));
+  $("settingsBtn").addEventListener("click", toggleSettingsPanel);
+  $("panelClose").addEventListener("click", closePanel);
+  $("panelMask").addEventListener("click", closePanel);
+  $("sidebarToggle").addEventListener("click", toggleSidebar);
   $("themeBtn").addEventListener("click", () => {
     applyTheme(document.body.hasAttribute("data-ds-dark-theme") ? "light" : "dark");
+    // diff2html 的配色跟随主题，已展开的变更面板需要按新主题重绘
+    if (state.panel.open && state.panel.view === "changes") renderChanges();
   });
 
-  document.querySelectorAll(".tab").forEach((tab) => {
+  document.querySelectorAll("#panelTabs .tab").forEach((tab) => {
     tab.addEventListener("click", () => {
-      document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+      document.querySelectorAll("#panelTabs .tab").forEach((t) => t.classList.remove("active"));
       tab.classList.add("active");
       state.tab = tab.dataset.tab;
       state.editing = null;
       state.promptEditing = null;
-      loadConfigs();
+      loadPanel();
     });
   });
 
@@ -1710,12 +2168,13 @@
 
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      closeDrawer();
+      closePanel();
       $("permMenu").classList.add("hidden");
     }
   });
 
   applyTheme(localStorage.getItem("wayfarer-theme") || "light");
+  initLayout();
   renderWorkspace();
   loadSessions();
   refreshModelBadge();

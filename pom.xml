@@ -20,6 +20,8 @@
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <openai-java.version>4.101.0</openai-java.version>
         <jgit.version>7.7.0.202606012155-r</jgit.version>
+        <!-- 允许 Mockito 的 inline mock maker 自附加，避免部分环境下测试 JVM 无法初始化 MockMaker -->
+        <argLine>-Djdk.attach.allowAttachSelf=true</argLine>
     </properties>
 
     <dependencies>

@@ -1,6 +1,7 @@
 package com.yf.wayfarer.change;
 
 import com.yf.wayfarer.loop.AgentContext;
+import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.toolcall.ToolCallInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,7 +11,10 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -82,6 +86,33 @@ class ChangeRecorderTest {
         ShadowRepository repository = store.forWorkspace(workspace.toString());
         assertEquals(1, repository.commits().size(), "失败调用不应产生提交");
         assertTrue(repository.dirtyPaths().contains("b.txt"), "残留改动留给下一次成功提交带走");
+    }
+
+    @Test
+    void 轮次结束时汇总本轮变更供页面展示() {
+        ShadowRepository repository = store.forWorkspace(workspace.toString());
+        repository.ensure();
+        write("a.txt", "hello");
+        Map<String, String> trailers = new LinkedHashMap<>();
+        trailers.put(ShadowRepository.TRAILER_SESSION, "session-1");
+        trailers.put(ShadowRepository.TRAILER_TRACE, "trace-1");
+        trailers.put(ShadowRepository.TRAILER_TOOL, "write");
+        trailers.put(ShadowRepository.TRAILER_CALL, "call-1");
+        repository.commit(Set.of("a.txt"), "write a.txt", trailers);
+
+        ChangeRecorder recorder = new ChangeRecorder(store, new ChangeService(store));
+        AgentMessage message = recorder.summary(context());
+
+        assertTrue(message instanceof AgentMessage.Other, "有变更时应返回一条 other 消息");
+        Map<?, ?> data = (Map<?, ?>) ((AgentMessage.Other) message).message();
+        assertEquals("changes", data.get("type"));
+        assertEquals("trace-1", data.get("traceId"));
+        assertEquals(1, ((List<?>) data.get("entries")).size());
+
+        // 没有变更的轮次不推送
+        AgentContext other = context();
+        other.put(AgentContext.TRACE_ID, "trace-empty");
+        assertNull(recorder.summary(other));
     }
 
     private AgentContext context() {

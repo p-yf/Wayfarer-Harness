@@ -60,7 +60,7 @@ public class SessionController {
     }
 
     @GetMapping("/{sessionId}")
-    public SessionMeta meta(@PathVariable String sessionId) {
+    public SessionMeta meta(@PathVariable("sessionId") String sessionId) {
         return session.meta(sessionId);
     }
 
@@ -68,7 +68,7 @@ public class SessionController {
      * 改写会话文件首行 METADATA 的内容，用于保存工作区等任意键值对。
      */
     @PutMapping("/{sessionId}/metadata")
-    public SessionMeta updateMetadata(@PathVariable String sessionId,
+    public SessionMeta updateMetadata(@PathVariable("sessionId") String sessionId,
                                       @RequestBody(required = false) Map<String, Object> content) {
         session.updateMetadata(sessionId, content == null ? Map.of() : content);
         return session.meta(sessionId);
@@ -79,7 +79,7 @@ public class SessionController {
      */
     @SuppressWarnings("unchecked")
     @PostMapping("/{sessionId}/messages")
-    public Map<String, Object> append(@PathVariable String sessionId, @RequestBody Map<String, Object> body) {
+    public Map<String, Object> append(@PathVariable("sessionId") String sessionId, @RequestBody Map<String, Object> body) {
         String traceId = body.get("traceId") == null || String.valueOf(body.get("traceId")).isBlank()
                 ? UUID.randomUUID().toString()
                 : String.valueOf(body.get("traceId"));
@@ -101,7 +101,7 @@ public class SessionController {
      * 全量消息，用于调试与导出；CUSTOM 是 agent 内部状态快照，不下发到页面。
      */
     @GetMapping("/{sessionId}/messages")
-    public List<SessionMessage> messages(@PathVariable String sessionId) {
+    public List<SessionMessage> messages(@PathVariable("sessionId") String sessionId) {
         return visible(session.messages(sessionId));
     }
 
@@ -109,9 +109,9 @@ public class SessionController {
      * 按 trace 滑动取历史：返回 traceId 之前最近 turns 轮的对话消息，traceId 为空时取最近 turns 轮。
      */
     @GetMapping("/{sessionId}/history")
-    public List<SessionMessage> history(@PathVariable String sessionId,
-                                        @RequestParam(required = false) String traceId,
-                                        @RequestParam(defaultValue = "3") int turns) {
+    public List<SessionMessage> history(@PathVariable("sessionId") String sessionId,
+                                        @RequestParam(name = "traceId", required = false) String traceId,
+                                        @RequestParam(name = "turns", defaultValue = "3") int turns) {
         return visible(session.historyBefore(sessionId, traceId, turns));
     }
 
@@ -129,7 +129,8 @@ public class SessionController {
      * 卸载内容一并复制，保证新会话里已有的占位符仍能解析到原文。
      */
     @PostMapping("/{sessionId}/fork")
-    public Map<String, Object> fork(@PathVariable String sessionId, @RequestParam String traceId) {
+    public Map<String, Object> fork(@PathVariable("sessionId") String sessionId,
+                                    @RequestParam("traceId") String traceId) {
         String forkedId = session.fork(sessionId, traceId);
         unloadedStore.copyAll(sessionId, forkedId);
         return idResult(forkedId);
@@ -139,7 +140,7 @@ public class SessionController {
      * 复制整个会话到新会话，卸载内容一并复制。
      */
     @PostMapping("/{sessionId}/clone")
-    public Map<String, Object> clone(@PathVariable String sessionId) {
+    public Map<String, Object> clone(@PathVariable("sessionId") String sessionId) {
         String clonedId = session.clone(sessionId);
         unloadedStore.copyAll(sessionId, clonedId);
         return idResult(clonedId);
@@ -153,9 +154,9 @@ public class SessionController {
      * 顺序不能反：消息一旦删掉，就不知道边界在哪了。</p>
      */
     @PostMapping("/{sessionId}/reset")
-    public Map<String, Object> reset(@PathVariable String sessionId,
-                                     @RequestParam String traceId,
-                                     @RequestParam(defaultValue = "true") boolean revertChanges) {
+    public Map<String, Object> reset(@PathVariable("sessionId") String sessionId,
+                                     @RequestParam("traceId") String traceId,
+                                     @RequestParam(name = "revertChanges", defaultValue = "true") boolean revertChanges) {
         Set<String> survivingTraces = revertChanges
                 ? ChangeService.survivingTraces(session.messages(sessionId), traceId)
                 : Set.of();
@@ -182,7 +183,7 @@ public class SessionController {
      * 删除会话，会话文件夹及其中的卸载消息一并删除。
      */
     @DeleteMapping("/{sessionId}")
-    public Map<String, Object> delete(@PathVariable String sessionId) {
+    public Map<String, Object> delete(@PathVariable("sessionId") String sessionId) {
         session.delete(sessionId);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("sessionId", sessionId);

@@ -2,6 +2,7 @@ package com.yf.wayfarer.agent.toolchain;
 
 import com.yf.wayfarer.hitl.HitlService;
 import com.yf.wayfarer.loop.AgentContext;
+import com.yf.wayfarer.loop.toolchain.ToolCallHandler;
 import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.FinishReason;

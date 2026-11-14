@@ -72,7 +72,7 @@ public class AgentController {
      * 终止指定会话的运行。
      */
     @PostMapping("/stop/{sessionId}")
-    public Mono<Map<String, Object>> stop(@PathVariable String sessionId) {
+    public Mono<Map<String, Object>> stop(@PathVariable("sessionId") String sessionId) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("sessionId", sessionId);
         result.put("stopped", agentService.cancel(sessionId));

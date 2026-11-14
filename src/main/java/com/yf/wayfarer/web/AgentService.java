@@ -1,8 +1,23 @@
 package com.yf.wayfarer.web;
 
 import com.yf.wayfarer.agent.Agent;
-import com.yf.wayfarer.agent.modelchain.MemoryCompactConfig;
+import com.yf.wayfarer.agent.AgentChain;
+import com.yf.wayfarer.loop.AssistantAndToolCallPersistHandler;
+import com.yf.wayfarer.loop.modelchain.MemoryCompactConfig;
+import com.yf.wayfarer.loop.modelchain.MemoryCompressHandler;
+import com.yf.wayfarer.loop.modelchain.MemoryManageHandler;
+import com.yf.wayfarer.loop.modelchain.ModelHandler;
+import com.yf.wayfarer.loop.modelchain.PlanReminderHandler;
+import com.yf.wayfarer.loop.modelchain.SkillsHandler;
+import com.yf.wayfarer.loop.modelchain.ToolResultRepairHandler;
+import com.yf.wayfarer.loop.modelchain.TraceRecordHandler;
+import com.yf.wayfarer.loop.modelchain.UserQueryPersistHandler;
+import com.yf.wayfarer.loop.toolchain.CodingToolApprovalHandler;
+import com.yf.wayfarer.loop.toolchain.ToolCallHandler;
+import com.yf.wayfarer.loop.toolchain.ToolCircleCheckHandler;
 import com.yf.wayfarer.change.ChangeRecorder;
+import com.yf.wayfarer.agent.agentchain.ChangeSummaryHandler;
+import com.yf.wayfarer.loop.LoopChain;
 import com.yf.wayfarer.tools.CodingTools;
 import com.yf.wayfarer.tools.PlanTools;
 import com.yf.wayfarer.tools.UnloadTools;
@@ -160,8 +175,26 @@ public class AgentService {
         ToolCall toolCall = new ToolCall();
         List<ToolDefinition> tools = toolCall.parse(new UnloadTools(unloadedStore), new PlanTools(),
                 new CodingTools());
-        return new Agent(chatModel(modelConfig()), tools, toolCall, maxTurns,
-                session, unloadedStore, compactConfig(), hitlService, skillStore, changeRecorder);
+        OpenAIChatModel model = chatModel(modelConfig());
+
+        // 模型链：用户请求入历史 → 计划提醒 → 记忆压缩 → 技能清单 → 补齐工具结果 → 调用记录 → 步骤持久化 → 模型调用 → 记忆回写
+        LoopChain modelChain = LoopChain.of(
+                new UserQueryPersistHandler(),
+                new PlanReminderHandler(),
+                new MemoryCompressHandler(model, unloadedStore, compactConfig()),
+                new SkillsHandler(skillStore),
+                new ToolResultRepairHandler(),
+                new TraceRecordHandler(),
+                new AssistantAndToolCallPersistHandler(),
+                new ModelHandler(model, tools),
+                new MemoryManageHandler());
+        // 工具链：重复调用检查 → 编码工具审批 → 步骤持久化 → 工具执行（执行前后记录文件变更）
+        LoopChain toolChain = LoopChain.of(new ToolCircleCheckHandler(),
+                new CodingToolApprovalHandler(hitlService), new AssistantAndToolCallPersistHandler(),
+                new ToolCallHandler(toolCall, changeRecorder));
+        // 运行级链：主循环结束后把本轮文件变更整体追加到流末尾
+        AgentChain agentChain = AgentChain.of(new ChangeSummaryHandler(changeRecorder));
+        return new Agent(session, modelChain, toolChain, agentChain, maxTurns);
     }
 
     private ModelConfig modelConfig() {

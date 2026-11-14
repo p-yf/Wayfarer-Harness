@@ -1,6 +1,7 @@
 package com.yf.wayfarer.agent.modelchain;
 
 import com.yf.wayfarer.loop.AgentContext;
+import com.yf.wayfarer.loop.modelchain.SkillsHandler;
 import com.yf.wayfarer.skill.SkillFileSystem;
 import com.yf.wayfarer.skill.SkillStore;
 import org.junit.jupiter.api.Test;

@@ -1,4 +1,4 @@
-package com.yf.wayfarer.agent.modelchain;
+package com.yf.wayfarer.loop.modelchain;
 
 /**
  * 记忆压缩配置。

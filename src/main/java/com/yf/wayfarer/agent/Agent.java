@@ -1,13 +1,21 @@
 package com.yf.wayfarer.agent;
 
-import com.yf.wayfarer.agent.modelchain.*;
-import com.yf.wayfarer.agent.toolchain.CodingToolApprovalHandler;
-import com.yf.wayfarer.agent.toolchain.ToolCallHandler;
-import com.yf.wayfarer.agent.toolchain.ToolCircleCheckHandler;
-import com.yf.wayfarer.change.ChangeRecorder;
+import com.yf.wayfarer.loop.AssistantAndToolCallPersistHandler;
+import com.yf.wayfarer.loop.modelchain.MemoryCompactConfig;
+import com.yf.wayfarer.loop.modelchain.MemoryCompressHandler;
+import com.yf.wayfarer.loop.modelchain.MemoryManageHandler;
+import com.yf.wayfarer.loop.modelchain.ModelHandler;
+import com.yf.wayfarer.loop.modelchain.PlanReminderHandler;
+import com.yf.wayfarer.loop.modelchain.SkillsHandler;
+import com.yf.wayfarer.loop.modelchain.ToolResultRepairHandler;
+import com.yf.wayfarer.loop.modelchain.TraceRecordHandler;
+import com.yf.wayfarer.loop.modelchain.UserQueryPersistHandler;
+import com.yf.wayfarer.loop.toolchain.CodingToolApprovalHandler;
+import com.yf.wayfarer.loop.toolchain.ToolCallHandler;
+import com.yf.wayfarer.loop.toolchain.ToolCircleCheckHandler;
 import com.yf.wayfarer.hitl.HitlService;
 import com.yf.wayfarer.loop.AgentContext;
-import com.yf.wayfarer.loop.Chain;
+import com.yf.wayfarer.loop.LoopChain;
 import com.yf.wayfarer.loop.Loop;
 import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ChatModel;
@@ -28,7 +36,7 @@ import java.util.UUID;
  * agent 门面。
  *
  * @author yyf
- * @description 组装模型链与工具链，按会话运行循环；用户请求与对话消息由链路中的处理器写入会话，
+ * @description 在会话上运行调用方装配好的模型链、工具链与运行级链；用户请求与对话消息由链路中的处理器写入会话，
  * 可持久化状态在运行结束后统一落盘
  */
 public class Agent extends Loop {
@@ -36,40 +44,30 @@ public class Agent extends Loop {
     private final Session session;
 
     /**
-     * @param unloadedStore 卸载消息存储，压缩时把大消息正文搬入其中
-     * @param compact       记忆压缩配置，决定压缩阈值
-     * @param hitl          人工确认协调器，编码工具审批时在此等待前端决定
-     * @param skillStore    技能存储，运行前把技能清单注入系统提示词
+     * 运行级链，包在主循环外层，用于在一次运行的首尾追加动作；为空时直接透传主循环消息流。
+     */
+    private final AgentChain agentChain;
+
+    /**
+     * @param modelChain 模型链，每轮一次模型调用
+     * @param toolChain  工具链，模型返回工具调用后执行
+     * @param agentChain 运行级链，传入 null 表示不做运行前后的额外处理
+     * @param maxTurns   最大轮次，null 表示不限制
+     */
+    public Agent(Session session, LoopChain modelChain, LoopChain toolChain, AgentChain agentChain, Integer maxTurns) {
+        super(modelChain, toolChain, maxTurns);
+        this.session = session;
+        this.agentChain = agentChain == null ? AgentChain.of() : agentChain;
+    }
+
+    /**
+     * 按组件装配标准链路，不含运行级处理器，供测试与默认场景使用。
      */
     public Agent(ChatModel model, List<ToolDefinition> tools, ToolCall toolCall,
                  Integer maxTurns, Session session, UnloadedMessageStore unloadedStore,
                  MemoryCompactConfig compact, HitlService hitl, SkillStore skillStore) {
-        this(model, tools, toolCall, maxTurns, session, unloadedStore, compact, hitl, skillStore, null);
-    }
-
-    /**
-     * @param changeRecorder 文件变更记录器，把编码工具的改动提交到工作区的影子仓库；为空时不记录
-     */
-    public Agent(ChatModel model, List<ToolDefinition> tools, ToolCall toolCall,
-                 Integer maxTurns, Session session, UnloadedMessageStore unloadedStore,
-                 MemoryCompactConfig compact, HitlService hitl, SkillStore skillStore,
-                 ChangeRecorder changeRecorder) {
-        // 模型链：用户请求入历史 → 计划提醒 → 记忆压缩 → 技能清单 → 补齐工具结果 → 调用记录 → 步骤持久化 → 模型调用 → 记忆回写
-        super(Chain.of(
-                new UserQueryPersistHandler(),
-                new PlanReminderHandler(),
-                new MemoryCompressHandler(model, unloadedStore, compact),
-                new SkillsHandler(skillStore),
-                new ToolResultRepairHandler(),
-                new TraceRecordHandler(),
-                new AssistantAndToolCallPersistHandler(),
-                new ModelHandler(model, tools),
-                new MemoryManageHandler()),
-                // 工具链：重复调用检查 → 编码工具审批 → 步骤持久化 → 工具执行（执行前后记录文件变更）
-                Chain.of(new ToolCircleCheckHandler(), new CodingToolApprovalHandler(hitl),
-                        new AssistantAndToolCallPersistHandler(), new ToolCallHandler(toolCall, changeRecorder)),
-                maxTurns);
-        this.session = session;
+        this(session, defaultModelChain(model, tools, unloadedStore, compact, skillStore),
+                defaultToolChain(toolCall, hitl), AgentChain.of(), maxTurns);
     }
 
     /**
@@ -89,8 +87,9 @@ public class Agent extends Loop {
                 : provided;
         context.put(AgentContext.TRACE_ID, traceId);
 
-        return run(context)
-                // 正常结束先持久化状态再完成，保证下游拿到完成信号时文件已落盘
+        // 运行级链包在主循环外层，其后的处理器可在主循环结束后继续追加消息
+        return agentChain.apply(context, run(context))
+                // 正常结束先持久化状态再结束流，保证下游拿到完成信号时状态已经落盘
                 .concatWith(Flux.defer(() -> {
                     persistStoreState(context, sessionId, traceId);
                     return Flux.empty();
@@ -98,6 +97,32 @@ public class Agent extends Loop {
                 // 取消与异常时 concatWith 不会执行，各补一次，保证任何终止方式都落盘
                 .doOnCancel(() -> persistStoreState(context, sessionId, traceId))
                 .doOnError(error -> persistStoreState(context, sessionId, traceId));
+    }
+
+    /**
+     * 标准模型链：用户请求入历史 → 计划提醒 → 记忆压缩 → 技能清单 → 补齐工具结果 → 调用记录 → 步骤持久化 → 模型调用 → 记忆回写
+     */
+    private static LoopChain defaultModelChain(ChatModel model, List<ToolDefinition> tools,
+                                               UnloadedMessageStore unloadedStore, MemoryCompactConfig compact,
+                                               SkillStore skillStore) {
+        return LoopChain.of(
+                new UserQueryPersistHandler(),
+                new PlanReminderHandler(),
+                new MemoryCompressHandler(model, unloadedStore, compact),
+                new SkillsHandler(skillStore),
+                new ToolResultRepairHandler(),
+                new TraceRecordHandler(),
+                new AssistantAndToolCallPersistHandler(),
+                new ModelHandler(model, tools),
+                new MemoryManageHandler());
+    }
+
+    /**
+     * 标准工具链：重复调用检查 → 编码工具审批 → 步骤持久化 → 工具执行
+     */
+    private static LoopChain defaultToolChain(ToolCall toolCall, HitlService hitl) {
+        return LoopChain.of(new ToolCircleCheckHandler(), new CodingToolApprovalHandler(hitl),
+                new AssistantAndToolCallPersistHandler(), new ToolCallHandler(toolCall));
     }
 
     /**

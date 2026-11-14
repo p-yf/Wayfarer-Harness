@@ -23,8 +23,9 @@ public class ChangeConfiguration {
     }
 
     @Bean
-    public ChangeRecorder changeRecorder(ShadowRepositoryStore store) {
-        return new ChangeRecorder(store);
+    public ChangeRecorder changeRecorder(ShadowRepositoryStore store, ChangeService changeService) {
+        // 记录器在轮次结束时用查询服务汇总本轮变更，供 SSE 推送
+        return new ChangeRecorder(store, changeService);
     }
 
     @Bean

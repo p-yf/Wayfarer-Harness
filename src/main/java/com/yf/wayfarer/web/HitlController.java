@@ -32,7 +32,7 @@ public class HitlController {
      * 待确认列表，agent 为空时返回全部。
      */
     @GetMapping("/pending")
-    public List<HitlService.Pending> pending(@RequestParam(required = false) String agent) {
+    public List<HitlService.Pending> pending(@RequestParam(name = "agent", required = false) String agent) {
         return hitlService.pending(agent);
     }
 

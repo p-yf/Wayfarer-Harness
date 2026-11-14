@@ -35,7 +35,7 @@ public class ModelConfigController {
     }
 
     @GetMapping("/{name}")
-    public ModelConfig read(@PathVariable String name) {
+    public ModelConfig read(@PathVariable("name") String name) {
         return store.read(name);
     }
 
@@ -43,13 +43,13 @@ public class ModelConfigController {
      * 新建或覆盖指定名称的配置。
      */
     @PutMapping("/{name}")
-    public ModelConfig save(@PathVariable String name, @RequestBody ModelConfig config) {
+    public ModelConfig save(@PathVariable("name") String name, @RequestBody ModelConfig config) {
         store.save(name, config);
         return config;
     }
 
     @DeleteMapping("/{name}")
-    public Map<String, Object> delete(@PathVariable String name) {
+    public Map<String, Object> delete(@PathVariable("name") String name) {
         boolean deleted = store.delete(name);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("name", name);

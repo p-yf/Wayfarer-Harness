@@ -24,18 +24,18 @@ public class Loop {
 
     private static final Logger log = LoggerFactory.getLogger(Loop.class);
 
-    private final Chain modelChain;
-    private final Chain toolChain;
+    private final LoopChain modelChain;
+    private final LoopChain toolChain;
     private final Integer maxTurns;
 
-    public Loop(Chain modelChain, Chain toolChain) {
+    public Loop(LoopChain modelChain, LoopChain toolChain) {
         this(modelChain, toolChain, null);
     }
 
     /**
      * @param maxTurns 最大轮次（每轮一次模型调用），null 表示不限制
      */
-    public Loop(Chain modelChain, Chain toolChain, Integer maxTurns) {
+    public Loop(LoopChain modelChain, LoopChain toolChain, Integer maxTurns) {
         this.modelChain = modelChain;
         this.toolChain = toolChain;
         this.maxTurns = maxTurns;
@@ -111,7 +111,7 @@ public class Loop {
     /**
      * 同步执行一个链路步骤，结束后清空本步登记的取消回调。
      */
-    private static void runStep(AgentContext context, Chain chain) {
+    private static void runStep(AgentContext context, LoopChain chain) {
         context.clearCancelHooks();
         try {
             chain.run(context);

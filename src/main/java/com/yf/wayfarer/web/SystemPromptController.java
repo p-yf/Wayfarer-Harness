@@ -35,7 +35,7 @@ public class SystemPromptController {
      * 列出指定 agent 的全部提示词，按顺序升序。
      */
     @GetMapping
-    public List<SystemPromptFile> list(@RequestParam String agent) {
+    public List<SystemPromptFile> list(@RequestParam("agent") String agent) {
         return store.list(agent);
     }
 
@@ -43,9 +43,9 @@ public class SystemPromptController {
      * 读取单个提示词。
      */
     @GetMapping("/{agent}/{name}/{order}")
-    public Map<String, Object> read(@PathVariable String agent,
-                                    @PathVariable String name,
-                                    @PathVariable int order) {
+    public Map<String, Object> read(@PathVariable("agent") String agent,
+                                    @PathVariable("name") String name,
+                                    @PathVariable("order") int order) {
         String content = store.read(agent, name, order);
         if (content == null) {
             throw new IllegalArgumentException("提示词不存在：" + fileName(agent, name, order));
@@ -62,9 +62,9 @@ public class SystemPromptController {
      * 新建或覆盖一个提示词。
      */
     @PutMapping("/{agent}/{name}/{order}")
-    public Map<String, Object> save(@PathVariable String agent,
-                                    @PathVariable String name,
-                                    @PathVariable int order,
+    public Map<String, Object> save(@PathVariable("agent") String agent,
+                                    @PathVariable("name") String name,
+                                    @PathVariable("order") int order,
                                     @RequestBody Map<String, Object> body) {
         Object content = body.get("content");
         store.save(agent, name, order, content == null ? "" : String.valueOf(content));
@@ -79,9 +79,9 @@ public class SystemPromptController {
      * 删除一个提示词。
      */
     @DeleteMapping("/{agent}/{name}/{order}")
-    public Map<String, Object> delete(@PathVariable String agent,
-                                      @PathVariable String name,
-                                      @PathVariable int order) {
+    public Map<String, Object> delete(@PathVariable("agent") String agent,
+                                      @PathVariable("name") String name,
+                                      @PathVariable("order") int order) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("deleted", store.delete(agent, name, order));
         return result;

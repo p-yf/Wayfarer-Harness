@@ -1,6 +1,6 @@
 package com.yf.wayfarer.web;
 
-import com.yf.wayfarer.agent.modelchain.MemoryCompactConfig;
+import com.yf.wayfarer.loop.modelchain.MemoryCompactConfig;
 import com.yf.wayfarer.config.ConfigStore;
 import com.yf.wayfarer.hitl.HitlService;
 import com.yf.wayfarer.model.ModelConfig;

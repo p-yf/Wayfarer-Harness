@@ -1,4 +1,4 @@
-package com.yf.wayfarer.agent.modelchain;
+package com.yf.wayfarer.loop.modelchain;
 
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.loop.ChainHandler;

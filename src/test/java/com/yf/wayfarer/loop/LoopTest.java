@@ -31,7 +31,7 @@ class LoopTest {
         List<String> trace = new ArrayList<>();
         AgentContext context = new AgentContext();
 
-        Chain chain = Chain.of(
+        LoopChain chain = LoopChain.of(
                 (ctx, next) -> {
                     trace.add("a-before");
                     next.run();
@@ -59,7 +59,7 @@ class LoopTest {
         context.put(AgentContext.TRACE_ID, "trace-1");
         ToolCallInfo call = new ToolCallInfo("call_1", "getWeather", "{\"city\":\"北京\"}");
 
-        Chain modelChain = Chain.of(
+        LoopChain modelChain = LoopChain.of(
                 (ctx, next) -> {
                     trace.add("model-before");
                     next.run();
@@ -75,7 +75,7 @@ class LoopTest {
                     }
                 });
 
-        Chain toolChain = Chain.of(
+        LoopChain toolChain = LoopChain.of(
                 (ctx, next) -> {
                     trace.add("tool-before");
                     next.run();
@@ -104,9 +104,9 @@ class LoopTest {
     @Test
     void 模型未请求工具时直接结束() {
         AtomicInteger toolRuns = new AtomicInteger();
-        Chain modelChain = Chain.of((ctx, next) ->
+        LoopChain modelChain = LoopChain.of((ctx, next) ->
                 ctx.put(AgentContext.MODEL_RESPONSE, responseWithoutToolCall()));
-        Chain toolChain = Chain.of((ctx, next) -> toolRuns.incrementAndGet());
+        LoopChain toolChain = LoopChain.of((ctx, next) -> toolRuns.incrementAndGet());
 
         StepVerifier.create(new Loop(modelChain, toolChain).run(new AgentContext())).verifyComplete();
 
@@ -121,13 +121,13 @@ class LoopTest {
         CountDownLatch resume = new CountDownLatch(1);
         CountDownLatch secondModel = new CountDownLatch(1);
 
-        Chain modelChain = Chain.of((ctx, next) -> {
+        LoopChain modelChain = LoopChain.of((ctx, next) -> {
             if (modelRuns.incrementAndGet() >= 2) {
                 secondModel.countDown();
             }
             ctx.put(AgentContext.MODEL_RESPONSE, responseWithToolCall());
         });
-        Chain toolChain = Chain.of((ctx, next) -> {
+        LoopChain toolChain = LoopChain.of((ctx, next) -> {
             toolRuns.incrementAndGet();
             toolStarted.countDown();
             try {
@@ -151,7 +151,7 @@ class LoopTest {
         CountDownLatch release = new CountDownLatch(1);
         CountDownLatch emitted = new CountDownLatch(1);
 
-        Chain modelChain = Chain.of((ctx, next) -> {
+        LoopChain modelChain = LoopChain.of((ctx, next) -> {
             ctx.agentMsgSink().accept(new AgentMessage.Text("t", "第一段"));
             ctx.agentMsgSink().accept(new AgentMessage.Text("t", "第二段"));
             emitted.countDown();
@@ -165,7 +165,7 @@ class LoopTest {
         });
 
         BlockingQueue<AgentMessage> received = new LinkedBlockingQueue<>();
-        Disposable disposable = new Loop(modelChain, Chain.of((ctx, next) -> {
+        Disposable disposable = new Loop(modelChain, LoopChain.of((ctx, next) -> {
         }))
                 .run(new AgentContext())
                 // 一次只请求一个，模拟 sse 写出这类分批请求的下游
@@ -213,7 +213,7 @@ class LoopTest {
             }
         };
 
-        Chain.of(late, early).run(context);
+        LoopChain.of(late, early).run(context);
 
         assertEquals(List.of("early", "late"), trace);
     }
@@ -222,11 +222,11 @@ class LoopTest {
     void 超过最大轮次后停止循环() {
         AtomicInteger modelRuns = new AtomicInteger();
         AtomicInteger toolRuns = new AtomicInteger();
-        Chain modelChain = Chain.of((ctx, next) -> {
+        LoopChain modelChain = LoopChain.of((ctx, next) -> {
             modelRuns.incrementAndGet();
             ctx.put(AgentContext.MODEL_RESPONSE, responseWithToolCall());
         });
-        Chain toolChain = Chain.of((ctx, next) -> toolRuns.incrementAndGet());
+        LoopChain toolChain = LoopChain.of((ctx, next) -> toolRuns.incrementAndGet());
 
         // 第一轮推送工具调用消息；轮次用尽后第二轮不再推送也不执行工具
         StepVerifier.create(new Loop(modelChain, toolChain, 2).run(new AgentContext()))

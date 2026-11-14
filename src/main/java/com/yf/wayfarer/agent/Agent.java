@@ -4,6 +4,7 @@ import com.yf.wayfarer.agent.modelchain.*;
 import com.yf.wayfarer.agent.toolchain.CodingToolApprovalHandler;
 import com.yf.wayfarer.agent.toolchain.ToolCallHandler;
 import com.yf.wayfarer.agent.toolchain.ToolCircleCheckHandler;
+import com.yf.wayfarer.change.ChangeRecorder;
 import com.yf.wayfarer.hitl.HitlService;
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.loop.Chain;
@@ -43,6 +44,16 @@ public class Agent extends Loop {
     public Agent(ChatModel model, List<ToolDefinition> tools, ToolCall toolCall,
                  Integer maxTurns, Session session, UnloadedMessageStore unloadedStore,
                  MemoryCompactConfig compact, HitlService hitl, SkillStore skillStore) {
+        this(model, tools, toolCall, maxTurns, session, unloadedStore, compact, hitl, skillStore, null);
+    }
+
+    /**
+     * @param changeRecorder 文件变更记录器，把编码工具的改动提交到工作区的影子仓库；为空时不记录
+     */
+    public Agent(ChatModel model, List<ToolDefinition> tools, ToolCall toolCall,
+                 Integer maxTurns, Session session, UnloadedMessageStore unloadedStore,
+                 MemoryCompactConfig compact, HitlService hitl, SkillStore skillStore,
+                 ChangeRecorder changeRecorder) {
         // 模型链：用户请求入历史 → 计划提醒 → 记忆压缩 → 技能清单 → 补齐工具结果 → 调用记录 → 步骤持久化 → 模型调用 → 记忆回写
         super(Chain.of(
                 new UserQueryPersistHandler(),
@@ -54,9 +65,10 @@ public class Agent extends Loop {
                 new AssistantAndToolCallPersistHandler(),
                 new ModelHandler(model, tools),
                 new MemoryManageHandler()),
-                // 工具链：重复调用检查 → 编码工具审批 → 步骤持久化 → 工具执行
+                // 工具链：重复调用检查 → 编码工具审批 → 步骤持久化 → 工具执行（执行前后记录文件变更）
                 Chain.of(new ToolCircleCheckHandler(), new CodingToolApprovalHandler(hitl),
-                        new AssistantAndToolCallPersistHandler(), new ToolCallHandler(toolCall)), maxTurns);
+                        new AssistantAndToolCallPersistHandler(), new ToolCallHandler(toolCall, changeRecorder)),
+                maxTurns);
         this.session = session;
     }
 

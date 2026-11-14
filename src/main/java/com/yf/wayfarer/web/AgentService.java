@@ -2,6 +2,7 @@ package com.yf.wayfarer.web;
 
 import com.yf.wayfarer.agent.Agent;
 import com.yf.wayfarer.agent.modelchain.MemoryCompactConfig;
+import com.yf.wayfarer.change.ChangeRecorder;
 import com.yf.wayfarer.tools.CodingTools;
 import com.yf.wayfarer.tools.PlanTools;
 import com.yf.wayfarer.tools.UnloadTools;
@@ -48,6 +49,7 @@ public class AgentService {
     private final ConfigStore<MemoryCompactConfig> compactConfigStore;
     private final HitlService hitlService;
     private final SkillStore skillStore;
+    private final ChangeRecorder changeRecorder;
     private final String rootWorkspace;
     private final String apiKey;
     private final String baseUrl;
@@ -68,6 +70,7 @@ public class AgentService {
                         ConfigStore<MemoryCompactConfig> compactConfigStore,
                         HitlService hitlService,
                         SkillStore skillStore,
+                        ChangeRecorder changeRecorder,
                         @Value("${wayfarer.root-workspace:./}") String rootWorkspace,
                         @Value("${wayfarer.model.api-key:}") String apiKey,
                         @Value("${wayfarer.model.base-url:https://api.deepseek.com}") String baseUrl,
@@ -83,6 +86,7 @@ public class AgentService {
         this.compactConfigStore = compactConfigStore;
         this.hitlService = hitlService;
         this.skillStore = skillStore;
+        this.changeRecorder = changeRecorder;
         this.rootWorkspace = Path.of(rootWorkspace).toAbsolutePath().normalize().toString();
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
@@ -157,7 +161,7 @@ public class AgentService {
         List<ToolDefinition> tools = toolCall.parse(new UnloadTools(unloadedStore), new PlanTools(),
                 new CodingTools());
         return new Agent(chatModel(modelConfig()), tools, toolCall, maxTurns,
-                session, unloadedStore, compactConfig(), hitlService, skillStore);
+                session, unloadedStore, compactConfig(), hitlService, skillStore, changeRecorder);
     }
 
     private ModelConfig modelConfig() {

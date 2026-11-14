@@ -1,6 +1,7 @@
 package com.yf.wayfarer.agent.toolchain;
 
 import com.yf.wayfarer.agent.modelchain.ToolResultRepairHandler;
+import com.yf.wayfarer.change.ChangeRecorder;
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.loop.ChainHandler;
 import com.yf.wayfarer.message.AgentMessage;
@@ -26,8 +27,18 @@ public class ToolCallHandler implements ChainHandler {
 
     private final ToolCall toolCall;
 
+    /**
+     * 变更记录器，为空时不做文件改动记录（单元测试直接构造处理器时会走这个分支）。
+     */
+    private final ChangeRecorder changeRecorder;
+
     public ToolCallHandler(ToolCall toolCall) {
+        this(toolCall, null);
+    }
+
+    public ToolCallHandler(ToolCall toolCall, ChangeRecorder changeRecorder) {
         this.toolCall = toolCall;
+        this.changeRecorder = changeRecorder;
     }
 
     @Override
@@ -64,10 +75,16 @@ public class ToolCallHandler implements ChainHandler {
         context.put(AgentContext.TOOL_NAME, info.name());
         log.info("执行工具 traceId={} 工具={} 参数={}", context.traceId(),
                 info.name(), abbreviate(info.arguments()));
+        // 执行前先取一次工作区脏文件快照，执行后与它做差集，得到本次调用真正改动的文件
+        ChangeRecorder.Snapshot snapshot = changeRecorder == null ? null : changeRecorder.before(context, info);
         Object result = toolCall.call(info, context);
         String content = result == null ? "" : String.valueOf(result);
         if (level == ToolCircleCheckHandler.Level.WARN) {
             content = content + "\n" + ToolCircleCheckHandler.WARN;
+        }
+        // 记录失败不影响工具结果；失败调用不会留下提交
+        if (changeRecorder != null) {
+            changeRecorder.after(context, snapshot, content);
         }
         log.info("工具完成 traceId={} 工具={} 结果长度={}", context.traceId(), info.name(), content.length());
         appendResult(context, info, content);

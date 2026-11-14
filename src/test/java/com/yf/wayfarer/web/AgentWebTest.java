@@ -12,7 +12,9 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.MediaType;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
@@ -237,6 +239,48 @@ class AgentWebTest {
         assertEquals("turn-web", stored.get(1).traceId(), "助手消息应沿用调用方指定的 trace id");
         assertEquals(JSONMsgType.EXTRADATA, stored.get(2).type());
         assertEquals("cursor-9", stored.get(3).content().get("store:cursor"));
+    }
+
+    @Test
+    void 压缩后通过other事件实时推送压缩提示() throws Exception {
+        Path configRoot = SESSION_ROOT.resolve("memorycompactconfig");
+        Path config = configRoot.resolve("tiny.jsonl");
+        Files.createDirectories(configRoot);
+        // 用极小的上下文窗口触发一级、二级压缩，避免压缩路径依赖真实模型
+        Files.writeString(config, """
+                {"contextWindow":100,"triggerRatio":0.5,"toolRatio":0.05,"messageRatio":0.05,"compressRatio":0.5,"keepChars":10,"enabled":true}
+                """ + System.lineSeparator(), StandardCharsets.UTF_8);
+        try {
+            String sessionId = session.create("压缩推送");
+            session.append(sessionId, JSONMsgType.USER, "turn-1", userContent("一".repeat(2000)));
+            session.append(sessionId, JSONMsgType.ASSISTANT, "turn-1", assistantContent("二".repeat(2000)));
+
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("sessionId", sessionId);
+            payload.put("userquery", "继续");
+
+            List<ServerSentEvent<String>> events = client.post()
+                    .uri("/api/agent/stream")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(payload)
+                    .exchange()
+                    .expectStatus().isOk()
+                    .returnResult(new ParameterizedTypeReference<ServerSentEvent<String>>() {
+                    })
+                    .getResponseBody()
+                    .collectList()
+                    .block();
+
+            assertTrue(events != null);
+            assertTrue(events.stream().anyMatch(event -> "other".equals(event.event())
+                            && event.data() != null && event.data().contains("\"type\":\"compact\"")),
+                    "运行中应以 other 事件推送压缩提示：" + events);
+            assertTrue(session.messages(sessionId).stream()
+                            .anyMatch(message -> message.type() == JSONMsgType.COMPACT),
+                    "压缩快照应同时写入会话文件");
+        } finally {
+            Files.deleteIfExists(config);
+        }
     }
 
     @Test

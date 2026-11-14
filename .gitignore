@@ -2,7 +2,7 @@
 target/
 
 # 会话数据
-sessions/
+.wayfarer/sessions/
 
 # 设计文档
 docs/
@@ -25,8 +25,11 @@ Thumbs.db
 
 # 本地配置
 *.local
-/sessions/
-/memorycompactconfig/
-/modelconfig/
+/.wayfarer/sessions/
+/.wayfarer/memorycompactconfig/
+/.wayfarer/modelconfig/
 /long-task-guidance/
-/skills/
+/.wayfarer/root-workspace/skills/
+
+# 影子仓库（文件变更记录），不进入项目自身的版本控制
+/.wayfarer/

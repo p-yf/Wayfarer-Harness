@@ -15,22 +15,33 @@ wayfarer:
     base-url: https://api.deepseek.com
     name: deepseek-flash
   session:
-    root: ./sessions
+    root: ./.wayfarer/sessions
     compact-threshold: 0
   # 系统提示词目录：文件名为 agent名称-提示词名称-顺序.md
   prompt:
-    root: ./systemprompt
+    root: ./.wayfarer/systemprompt
   # 根工作区：其下 skills 目录存放技能文件，编码工具对它的权限与工作区一致
-  root-workspace: ./
+  root-workspace: ./.wayfarer/root-workspace
   # 模型配置目录：每个 jsonl 文件一份配置，文件名即配置名称
   model-config:
-    root: ./modelconfig
+    root: ./.wayfarer/modelconfig
   # 记忆压缩配置目录：每个 jsonl 文件一份配置，文件名即配置名称
   memory-compact-config:
-    root: ./memorycompactconfig
+    root: ./.wayfarer/memorycompactconfig
   agent:
     name: wayfarer
     max-turns:
   # 人工确认：等待工具确认的最长秒数，超时按未批准处理
   hitl:
     timeout-seconds: 300
+  # 文件变更记录：影子 git 仓库按工作区建立，git-dir 放在工作区之外，不会生成 .git
+  changes:
+    enabled: true
+    root: ./.wayfarer/shadow
+    allow-restore: false
+    # 这些目录/文件不参与变更记录，写进影子仓库的 info/exclude，不修改工作区自己的 .gitignore
+    exclude:
+      - .git
+      - .wayfarer
+      - target
+      - node_modules

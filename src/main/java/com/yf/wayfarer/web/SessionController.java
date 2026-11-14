@@ -1,10 +1,13 @@
 package com.yf.wayfarer.web;
 
+import com.yf.wayfarer.change.ChangeService;
 import com.yf.wayfarer.session.JSONMsgType;
 import com.yf.wayfarer.session.Session;
 import com.yf.wayfarer.session.SessionMessage;
 import com.yf.wayfarer.session.SessionMeta;
 import com.yf.wayfarer.session.UnloadedMessageStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -18,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -30,12 +34,16 @@ import java.util.UUID;
 @RequestMapping("/api/sessions")
 public class SessionController {
 
+    private static final Logger log = LoggerFactory.getLogger(SessionController.class);
+
     private final Session session;
     private final UnloadedMessageStore unloadedStore;
+    private final ChangeService changeService;
 
-    public SessionController(Session session, UnloadedMessageStore unloadedStore) {
+    public SessionController(Session session, UnloadedMessageStore unloadedStore, ChangeService changeService) {
         this.session = session;
         this.unloadedStore = unloadedStore;
+        this.changeService = changeService;
     }
 
     @PostMapping
@@ -139,13 +147,34 @@ public class SessionController {
 
     /**
      * 回退会话：删除指定轮次及其之后的全部消息，该轮次之前的对话保留。
+     *
+     * <p>默认同时回退该会话在这几轮里对工作区做的文件改动（revertChanges=true）：
+     * 先用会话里的 trace 顺序算出「保留的轮次」，再删消息，最后按影子仓库记录生成回退提交。
+     * 顺序不能反：消息一旦删掉，就不知道边界在哪了。</p>
      */
     @PostMapping("/{sessionId}/reset")
-    public Map<String, Object> reset(@PathVariable String sessionId, @RequestParam String traceId) {
+    public Map<String, Object> reset(@PathVariable String sessionId,
+                                     @RequestParam String traceId,
+                                     @RequestParam(defaultValue = "true") boolean revertChanges) {
+        Set<String> survivingTraces = revertChanges
+                ? ChangeService.survivingTraces(session.messages(sessionId), traceId)
+                : Set.of();
         session.reset(sessionId, traceId);
+
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("sessionId", sessionId);
         result.put("resetFrom", traceId);
+        if (revertChanges) {
+            try {
+                result.put("changes", changeService.revertSessionChanges(sessionId, survivingTraces, traceId));
+            } catch (RuntimeException e) {
+                // 会话已经删掉了，文件回退失败只提示，不能让接口报错把状态搅乱
+                log.warn("会话回退时文件回退失败 sessionId={} traceId={}", sessionId, traceId, e);
+                Map<String, Object> error = new LinkedHashMap<>();
+                error.put("error", "变更回退失败：" + e.getMessage());
+                result.put("changes", error);
+            }
+        }
         return result;
     }
 

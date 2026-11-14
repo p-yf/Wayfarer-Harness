@@ -3,6 +3,7 @@ package com.yf.wayfarer.agent.modelchain;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.yf.wayfarer.loop.AgentContext;
+import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.ModelConfig;
 import com.yf.wayfarer.model.openai.OpenAIChatModel;
@@ -24,9 +25,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -237,6 +240,22 @@ class MemoryCompressTest {
                 () -> new MemoryCompactConfig(1000, 0.7, 0.0, 0.02, 0.5, 100, true));
         assertThrows(IllegalArgumentException.class,
                 () -> new MemoryCompactConfig(1000, 0.7, 0.01, 0.02, 0.5, -1, true));
+    }
+
+    @Test
+    void 压缩后推送other事件供页面实时展示() {
+        AgentContext context = contextOf(
+                new ChatMessage(ChatMessage.Role.USER, "a".repeat(3000)),
+                new ChatMessage(ChatMessage.Role.USER, "b".repeat(3000)));
+        List<AgentMessage> emitted = new ArrayList<>();
+        context.put(AgentContext.AGENT_MSG_SINK, (Consumer<AgentMessage>) emitted::add);
+
+        run(handler(1000, 0.9, 0.9, 0.5, 100), context);
+
+        assertTrue(emitted.stream().anyMatch(message -> message instanceof AgentMessage.Other other
+                        && other.message() instanceof Map<?, ?> data
+                        && "compact".equals(data.get("type"))),
+                "压缩后应推送 other 事件，否则页面要刷新才能看到压缩标记");
     }
 
     private MemoryCompressHandler handler(int window, double toolRatio, double messageRatio,

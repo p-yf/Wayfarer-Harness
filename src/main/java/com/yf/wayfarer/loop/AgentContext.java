@@ -96,6 +96,17 @@ public final class AgentContext implements ToolContext {
      */
     public static final String PLAN = STORE_PREFIX + "plan";
 
+    /**
+     * 运行是否已被取消，由循环在取消时写入，工具据此提前结束。
+     */
+    public static final String CANCELLED = "cancelled";
+
+    /**
+     * 本轮已流出的助手消息在消息历史中的下标。
+     * 模型边输出边按增量更新该消息，运行被取消时记忆里才有与屏幕一致的部分回复。
+     */
+    public static final String PARTIAL_ASSISTANT = "partialAssistant";
+
     private final ConcurrentHashMap<String, Object> values = new ConcurrentHashMap<>();
 
     /**
@@ -108,6 +119,13 @@ public final class AgentContext implements ToolContext {
      */
     public void onCancel(Runnable hook) {
         cancelHooks.add(hook);
+    }
+
+    /**
+     * 清空取消回调，每个步骤开始前调用，避免已结束步骤的回调残留。
+     */
+    public void clearCancelHooks() {
+        cancelHooks.clear();
     }
 
     /**
@@ -140,6 +158,13 @@ public final class AgentContext implements ToolContext {
 
     public boolean containsKey(String key) {
         return values.containsKey(key);
+    }
+
+    /**
+     * 本次运行是否已被取消。
+     */
+    public boolean isCancelled() {
+        return Boolean.TRUE.equals(values.get(CANCELLED));
     }
 
     public void remove(String key) {

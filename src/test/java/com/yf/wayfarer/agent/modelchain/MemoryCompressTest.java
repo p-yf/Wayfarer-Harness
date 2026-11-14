@@ -244,7 +244,8 @@ class MemoryCompressTest {
     }
 
     private void run(MemoryCompressHandler handler, AgentContext context) {
-        handler.run(context, Mono.empty()).block();
+        handler.run(context, () -> {
+        });
     }
 
     private static AgentContext contextOf(ChatMessage... messages) {

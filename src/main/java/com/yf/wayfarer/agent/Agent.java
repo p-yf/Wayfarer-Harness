@@ -38,15 +38,16 @@ public class Agent extends Loop {
     public Agent(ChatModel model, List<ToolDefinition> tools, ToolCall toolCall,
                  Integer maxTurns, Session session, UnloadedMessageStore unloadedStore,
                  MemoryCompactConfig compact) {
+        // 模型链：用户请求入历史 → 记忆压缩 → 补齐工具结果 → 调用记录 → 步骤持久化 → 模型调用 → 记忆回写
         super(Chain.of(
-                        // 模型链：用户请求落盘 → 记忆压缩 → 步骤持久化 → 调用记录 → 模型调用 → 记忆回写
-                        new UserQueryPersistHandler(),
-                        new MemoryCompressHandler(model, unloadedStore, compact),
-                        new AssistantAndToolCallPersistHandler(),
-                        new TraceRecordHandler(),
-                        new ModelHandler(model, tools),
-                        new MemoryManageHandler()),
-                // 工具链：重复调用检查 → 步骤持久化包裹工具执行，负责工具结果落盘
+                new UserQueryPersistHandler(),
+                new MemoryCompressHandler(model, unloadedStore, compact),
+                new ToolResultRepairHandler(),
+                new TraceRecordHandler(),
+                new AssistantAndToolCallPersistHandler(),
+                new ModelHandler(model, tools),
+                new MemoryManageHandler()),
+                // 工具链：重复调用检查 → 步骤持久化 → 工具执行
                 Chain.of(new ToolCircleCheckHandler(),
                         new AssistantAndToolCallPersistHandler(), new ToolCallHandler(toolCall)), maxTurns);
         this.session = session;
@@ -70,11 +71,14 @@ public class Agent extends Loop {
         context.put(AgentContext.TRACE_ID, traceId);
 
         return run(context)
-                // 循环正常结束后先持久化状态再完成，保证下游拿到完成信号时文件已落盘
+                // 正常结束先持久化状态再完成，保证下游拿到完成信号时文件已落盘
                 .concatWith(Flux.defer(() -> {
                     persistStoreState(context, sessionId, traceId);
                     return Flux.empty();
-                }));
+                }))
+                // 取消与异常时 concatWith 不会执行，各补一次，保证任何终止方式都落盘
+                .doOnCancel(() -> persistStoreState(context, sessionId, traceId))
+                .doOnError(error -> persistStoreState(context, sessionId, traceId));
     }
 
     /**

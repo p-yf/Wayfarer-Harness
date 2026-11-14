@@ -4,7 +4,8 @@ import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.loop.ChainHandler;
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.ModelResponse;
-import reactor.core.publisher.Mono;
+
+import java.util.List;
 
 /**
  * 记忆管理处理器。
@@ -21,16 +22,23 @@ public class MemoryManageHandler implements ChainHandler {
     }
 
     @Override
-    public Mono<Void> run(AgentContext context, Mono<Void> next) {
-        return Mono.fromRunnable(() -> {
-            ModelResponse response = context.modelResponse();
-            if (response == null) {
-                return;
-            }
+    public void run(AgentContext context, Runnable next) {
+        ModelResponse response = context.modelResponse();
+        if (response != null) {
             // 记忆即记录：思考内容一律完整保留，会话落盘与历史回放都依赖它。
             // 是否回传给模型属于供应商报文细节，由模型适配器按工具调用情况决定。
-            context.messages().add(ChatMessage.assistant(response.content(),
-                    response.reasoningContent(), response.toolCalls()));
-        }).then(next);
+            ChatMessage message = ChatMessage.assistant(response.content(),
+                    response.reasoningContent(), response.toolCalls());
+            List<ChatMessage> messages = context.messages();
+            Integer index = context.get(AgentContext.PARTIAL_ASSISTANT, Integer.class);
+            if (index != null && index >= 0 && index < messages.size()) {
+                // 用完整响应替换流式过程中边输出边更新的那条
+                messages.set(index, message);
+                context.remove(AgentContext.PARTIAL_ASSISTANT);
+            } else {
+                messages.add(message);
+            }
+        }
+        next.run();
     }
 }

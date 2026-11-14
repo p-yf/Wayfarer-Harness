@@ -2,9 +2,9 @@ package com.yf.wayfarer.web;
 
 import com.yf.wayfarer.agent.Agent;
 import com.yf.wayfarer.agent.modelchain.MemoryCompactConfig;
-import com.yf.wayfarer.agent.toolchain.CodingTools;
-import com.yf.wayfarer.agent.toolchain.PlanTools;
-import com.yf.wayfarer.agent.toolchain.UnloadTools;
+import com.yf.wayfarer.tools.CodingTools;
+import com.yf.wayfarer.tools.PlanTools;
+import com.yf.wayfarer.tools.UnloadTools;
 import com.yf.wayfarer.config.ConfigStore;
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.message.AgentMessage;

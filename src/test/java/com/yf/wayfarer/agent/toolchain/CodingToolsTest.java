@@ -3,6 +3,7 @@ package com.yf.wayfarer.agent.toolchain;
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.toolcall.ToolCall;
 import com.yf.wayfarer.toolcall.ToolCallInfo;
+import com.yf.wayfarer.tools.CodingTools;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

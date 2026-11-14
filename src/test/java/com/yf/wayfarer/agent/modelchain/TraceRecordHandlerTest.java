@@ -49,9 +49,7 @@ class TraceRecordHandlerTest {
         Usage usage = new Usage(10L, 5L, 15L, 6L, 4L, 2L);
         ModelResponse response = new ModelResponse("id", "deepseek-flash", 1L, "回答", "",
                 FinishReason.STOP, List.of(), usage);
-        Mono<Void> next = Mono.fromRunnable(() -> context.put(AgentContext.MODEL_RESPONSE, response));
-
-        StepVerifier.create(new TraceRecordHandler().run(context, next)).verifyComplete();
+        new TraceRecordHandler().run(context, () -> context.put(AgentContext.MODEL_RESPONSE, response));
 
         List<SessionMessage> messages = session.messages(id);
         assertEquals(1, messages.size());

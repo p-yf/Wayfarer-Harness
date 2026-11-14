@@ -5,6 +5,7 @@ import com.yf.wayfarer.session.UnloadedMessageStore;
 import com.yf.wayfarer.toolcall.ToolCall;
 import com.yf.wayfarer.toolcall.ToolCallInfo;
 import com.yf.wayfarer.toolcall.ToolDefinition;
+import com.yf.wayfarer.tools.UnloadTools;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

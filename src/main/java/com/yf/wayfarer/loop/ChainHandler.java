@@ -1,22 +1,25 @@
 package com.yf.wayfarer.loop;
 
-import reactor.core.publisher.Mono;
-
 /**
- * 环绕式责任链的节点。
+ * 环绕式责任链处理器。
  *
  * @author yyf
- * @description 在 next 前后执行自定义逻辑，sort 越小执行顺序越靠前，取消订阅即终止整条链路
+ * @description 同步执行：前置逻辑写在 next.run() 之前，后置逻辑写在之后，
+ * 不需要编排响应式信号即可拦截模型调用与工具执行的前后
  */
-@FunctionalInterface
 public interface ChainHandler {
 
-    Mono<Void> run(AgentContext context, Mono<Void> next);
-
     /**
-     * 执行顺序，越小越靠前，默认 0。
+     * 执行顺序，值越小越靠前。
      */
     default int sort() {
         return 0;
     }
+
+    /**
+     * 处理一次步骤。
+     *
+     * @param next 链路中的下一个处理器，需要放行时调用 next.run()
+     */
+    void run(AgentContext context, Runnable next);
 }

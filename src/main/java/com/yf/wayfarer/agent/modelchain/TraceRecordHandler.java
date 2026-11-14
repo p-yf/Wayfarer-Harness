@@ -9,7 +9,6 @@ import com.yf.wayfarer.session.JSONMsgType;
 import com.yf.wayfarer.session.Session;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import reactor.core.publisher.Mono;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -36,11 +35,14 @@ public class TraceRecordHandler implements ChainHandler {
     }
 
     @Override
-    public Mono<Void> run(AgentContext context, Mono<Void> next) {
-        return Mono.defer(() -> {
-            long start = System.nanoTime();
-            return next.then(Mono.fromRunnable(() -> record(context, start)));
-        });
+    public void run(AgentContext context, Runnable next) {
+        long start = System.nanoTime();
+        next.run();
+        // 被终止的这一轮没有完整响应，不写调用记录
+        if (context.isCancelled()) {
+            return;
+        }
+        record(context, start);
     }
 
     private static void record(AgentContext context, long start) {

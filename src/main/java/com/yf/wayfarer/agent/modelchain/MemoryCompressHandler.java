@@ -11,7 +11,6 @@ import com.yf.wayfarer.session.Session;
 import com.yf.wayfarer.session.SessionMessage;
 import com.yf.wayfarer.session.UnloadedMessageStore;
 import com.yf.wayfarer.toolcall.ToolCallInfo;
-import reactor.core.publisher.Mono;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -65,8 +64,9 @@ public class MemoryCompressHandler implements ChainHandler {
     }
 
     @Override
-    public Mono<Void> run(AgentContext context, Mono<Void> next) {
-        return Mono.fromRunnable(() -> compress(context)).then(next);
+    public void run(AgentContext context, Runnable next) {
+        compress(context);
+        next.run();
     }
 
     /**

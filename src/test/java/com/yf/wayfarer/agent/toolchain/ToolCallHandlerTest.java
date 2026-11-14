@@ -132,7 +132,8 @@ class ToolCallHandlerTest {
 
     private void run(AgentContext context, CountDownLatch done) {
         // 工具会在执行中阻塞等待决定，放到独立线程模拟真实运行环境
-        new ToolCallHandler(toolCall).run(context, Mono.empty())
+        Mono.fromRunnable(() -> new ToolCallHandler(toolCall).run(context, () -> {
+                }))
                 .doFinally(ignored -> done.countDown())
                 .subscribeOn(Schedulers.boundedElastic())
                 .subscribe();

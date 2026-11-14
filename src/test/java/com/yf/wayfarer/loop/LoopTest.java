@@ -6,7 +6,6 @@ import com.yf.wayfarer.model.ModelResponse;
 import com.yf.wayfarer.toolcall.ToolCallInfo;
 import org.junit.jupiter.api.Test;
 import reactor.core.Disposable;
-import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import java.util.ArrayList;
@@ -33,15 +32,19 @@ class LoopTest {
         AgentContext context = new AgentContext();
 
         Chain chain = Chain.of(
-                (ctx, next) -> Mono.fromRunnable(() -> trace.add("a-before"))
-                        .then(next)
-                        .doOnSuccess(ignored -> trace.add("a-after")),
-                (ctx, next) -> Mono.fromRunnable(() -> trace.add("b-before"))
-                        .then(next)
-                        .doOnSuccess(ignored -> trace.add("b-after")),
-                (ctx, next) -> Mono.fromRunnable(() -> ctx.put("flag", "value")));
+                (ctx, next) -> {
+                    trace.add("a-before");
+                    next.run();
+                    trace.add("a-after");
+                },
+                (ctx, next) -> {
+                    trace.add("b-before");
+                    next.run();
+                    trace.add("b-after");
+                },
+                (ctx, next) -> ctx.put("flag", "value"));
 
-        StepVerifier.create(chain.run(context)).verifyComplete();
+        chain.run(context);
 
         assertEquals(List.of("a-before", "b-before", "b-after", "a-after"), trace);
         assertEquals("value", context.get("flag"));
@@ -57,10 +60,12 @@ class LoopTest {
         ToolCallInfo call = new ToolCallInfo("call_1", "getWeather", "{\"city\":\"北京\"}");
 
         Chain modelChain = Chain.of(
-                (ctx, next) -> Mono.fromRunnable(() -> trace.add("model-before"))
-                        .then(next)
-                        .doOnSuccess(ignored -> trace.add("model-after")),
-                (ctx, next) -> Mono.fromRunnable(() -> {
+                (ctx, next) -> {
+                    trace.add("model-before");
+                    next.run();
+                    trace.add("model-after");
+                },
+                (ctx, next) -> {
                     if (modelRuns.incrementAndGet() == 1) {
                         ctx.agentMsgSink().accept(new AgentMessage.Text("trace-1", "查天气"));
                         ctx.put(AgentContext.MODEL_RESPONSE, responseWithToolCall());
@@ -68,16 +73,18 @@ class LoopTest {
                         ctx.agentMsgSink().accept(new AgentMessage.Text("trace-1", "北京晴"));
                         ctx.put(AgentContext.MODEL_RESPONSE, responseWithoutToolCall());
                     }
-                }));
+                });
 
         Chain toolChain = Chain.of(
-                (ctx, next) -> Mono.fromRunnable(() -> trace.add("tool-before"))
-                        .then(next)
-                        .doOnSuccess(ignored -> trace.add("tool-after")),
-                (ctx, next) -> Mono.fromRunnable(() -> {
+                (ctx, next) -> {
+                    trace.add("tool-before");
+                    next.run();
+                    trace.add("tool-after");
+                },
+                (ctx, next) -> {
                     toolRuns.incrementAndGet();
                     ctx.agentMsgSink().accept(new AgentMessage.ToolResult("trace-1", "call_1", "晴，25度"));
-                }));
+                });
 
         StepVerifier.create(new Loop(modelChain, toolChain).run(context))
                 .expectNext(new AgentMessage.Text("trace-1", "查天气"))
@@ -98,8 +105,8 @@ class LoopTest {
     void 模型未请求工具时直接结束() {
         AtomicInteger toolRuns = new AtomicInteger();
         Chain modelChain = Chain.of((ctx, next) ->
-                Mono.fromRunnable(() -> ctx.put(AgentContext.MODEL_RESPONSE, responseWithoutToolCall())));
-        Chain toolChain = Chain.of((ctx, next) -> Mono.fromRunnable(toolRuns::incrementAndGet));
+                ctx.put(AgentContext.MODEL_RESPONSE, responseWithoutToolCall()));
+        Chain toolChain = Chain.of((ctx, next) -> toolRuns.incrementAndGet());
 
         StepVerifier.create(new Loop(modelChain, toolChain).run(new AgentContext())).verifyComplete();
 
@@ -114,20 +121,20 @@ class LoopTest {
         CountDownLatch resume = new CountDownLatch(1);
         CountDownLatch secondModel = new CountDownLatch(1);
 
-        Chain modelChain = Chain.of((ctx, next) -> Mono.fromRunnable(() -> {
+        Chain modelChain = Chain.of((ctx, next) -> {
             if (modelRuns.incrementAndGet() >= 2) {
                 secondModel.countDown();
             }
             ctx.put(AgentContext.MODEL_RESPONSE, responseWithToolCall());
-        }));
-        Chain toolChain = Chain.of((ctx, next) -> Mono.fromRunnable(() -> {
+        });
+        Chain toolChain = Chain.of((ctx, next) -> {
             toolRuns.incrementAndGet();
             toolStarted.countDown();
             try {
                 resume.await(5, TimeUnit.SECONDS);
             } catch (InterruptedException ignored) {
             }
-        }));
+        });
 
         Disposable disposable = new Loop(modelChain, toolChain).run(new AgentContext()).subscribe();
         assertTrue(toolStarted.await(5, TimeUnit.SECONDS));
@@ -144,7 +151,7 @@ class LoopTest {
         CountDownLatch release = new CountDownLatch(1);
         CountDownLatch emitted = new CountDownLatch(1);
 
-        Chain modelChain = Chain.of((ctx, next) -> Mono.fromRunnable(() -> {
+        Chain modelChain = Chain.of((ctx, next) -> {
             ctx.agentMsgSink().accept(new AgentMessage.Text("t", "第一段"));
             ctx.agentMsgSink().accept(new AgentMessage.Text("t", "第二段"));
             emitted.countDown();
@@ -155,10 +162,11 @@ class LoopTest {
                 Thread.currentThread().interrupt();
             }
             ctx.put(AgentContext.MODEL_RESPONSE, responseWithoutToolCall());
-        }));
+        });
 
         BlockingQueue<AgentMessage> received = new LinkedBlockingQueue<>();
-        Disposable disposable = new Loop(modelChain, Chain.of((ctx, next) -> Mono.empty()))
+        Disposable disposable = new Loop(modelChain, Chain.of((ctx, next) -> {
+        }))
                 .run(new AgentContext())
                 // 一次只请求一个，模拟 sse 写出这类分批请求的下游
                 .limitRate(1)
@@ -187,18 +195,25 @@ class LoopTest {
             }
 
             @Override
-            public Mono<Void> run(AgentContext ctx, Mono<Void> next) {
-                return Mono.fromRunnable(() -> trace.add("late")).then(next);
+            public void run(AgentContext ctx, Runnable next) {
+                trace.add("late");
+                next.run();
             }
         };
         ChainHandler early = new ChainHandler() {
             @Override
-            public Mono<Void> run(AgentContext ctx, Mono<Void> next) {
-                return Mono.fromRunnable(() -> trace.add("early")).then(next);
+            public int sort() {
+                return -100;
+            }
+
+            @Override
+            public void run(AgentContext ctx, Runnable next) {
+                trace.add("early");
+                next.run();
             }
         };
 
-        StepVerifier.create(Chain.of(late, early).run(context)).verifyComplete();
+        Chain.of(late, early).run(context);
 
         assertEquals(List.of("early", "late"), trace);
     }
@@ -207,11 +222,11 @@ class LoopTest {
     void 超过最大轮次后停止循环() {
         AtomicInteger modelRuns = new AtomicInteger();
         AtomicInteger toolRuns = new AtomicInteger();
-        Chain modelChain = Chain.of((ctx, next) -> Mono.fromRunnable(() -> {
+        Chain modelChain = Chain.of((ctx, next) -> {
             modelRuns.incrementAndGet();
             ctx.put(AgentContext.MODEL_RESPONSE, responseWithToolCall());
-        }));
-        Chain toolChain = Chain.of((ctx, next) -> Mono.fromRunnable(toolRuns::incrementAndGet));
+        });
+        Chain toolChain = Chain.of((ctx, next) -> toolRuns.incrementAndGet());
 
         // 第一轮推送工具调用消息；轮次用尽后第二轮不再推送也不执行工具
         StepVerifier.create(new Loop(modelChain, toolChain, 2).run(new AgentContext()))

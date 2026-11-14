@@ -1,4 +1,4 @@
-package com.yf.wayfarer.agent.toolchain;
+package com.yf.wayfarer.tools;
 
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.toolcall.Tool;
@@ -93,6 +93,8 @@ public class CodingTools {
                     .directory(cwd.toFile())
                     .redirectErrorStream(true)
                     .start();
+            // 运行被终止时立刻杀掉子进程树，否则命令会继续在后台执行
+            context.onCancel(() -> killTree(process));
             // 输出在独立线程读取，避免进程缓冲区写满后阻塞 waitFor
             CompletableFuture<String> output = CompletableFuture.supplyAsync(() -> {
                 try (InputStream in = process.getInputStream()) {
@@ -122,6 +124,9 @@ public class CodingTools {
             if (truncation.truncated()) {
                 content += "\n\n[仅显示最后 " + truncation.outputLines() + " 行，共 "
                         + truncation.totalLines() + " 行]";
+            }
+            if (context.isCancelled()) {
+                return append(content, "命令已被终止");
             }
             if (!finished) {
                 return append(content, "命令超时，已在 " + timeout + " 秒后终止");

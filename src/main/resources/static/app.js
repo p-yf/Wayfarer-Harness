@@ -23,6 +23,11 @@
     compactConfigs: {},
     prompts: [],
     promptEditing: null,
+    skillPath: "",
+    skillParent: null,
+    skillEntries: [],
+    skillFile: null,
+    skillCreating: null,
     editing: null,
     workspace: "",
     pendingWorkspace: "",
@@ -1116,9 +1121,22 @@
     inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + "px";
   }
 
-  function openDrawer() {
+  /**
+   * 打开右侧面板：model/compact 是设置页，prompt/skills 从侧边栏直接进入。
+   */
+  function openDrawer(tab) {
+    state.tab = tab || "model";
+    state.editing = null;
+    state.promptEditing = null;
+    resetSkillBrowser();
     $("drawer").classList.remove("hidden");
     $("drawerMask").classList.remove("hidden");
+    const standalone = state.tab === "prompt" || state.tab === "skills";
+    $("drawerTitle").textContent = { prompt: "系统提示词", skills: "Skills" }[state.tab] || "设置";
+    $("drawerTabs").classList.toggle("hidden", standalone);
+    document.querySelectorAll(".tab").forEach((item) => {
+      item.classList.toggle("active", item.dataset.tab === state.tab);
+    });
     loadConfigs();
   }
 
@@ -1126,6 +1144,15 @@
     $("drawer").classList.add("hidden");
     $("drawerMask").classList.add("hidden");
     state.editing = null;
+    resetSkillBrowser();
+  }
+
+  function resetSkillBrowser() {
+    state.skillPath = "";
+    state.skillParent = null;
+    state.skillEntries = [];
+    state.skillFile = null;
+    state.skillCreating = null;
   }
 
   async function loadConfigs() {
@@ -1134,6 +1161,11 @@
         state.modelConfigs = await Api.listModelConfigs();
       } else if (state.tab === "compact") {
         state.compactConfigs = await Api.listCompactConfigs();
+      } else if (state.tab === "skills") {
+        const tree = await Api.skillTree(state.skillPath);
+        state.skillPath = tree.path || "";
+        state.skillParent = tree.parent;
+        state.skillEntries = tree.entries || [];
       } else {
         state.prompts = await Api.listPrompts(AGENT_NAME);
       }
@@ -1188,6 +1220,10 @@
   function renderDrawer() {
     if (state.tab === "prompt") {
       renderPrompts();
+      return;
+    }
+    if (state.tab === "skills") {
+      renderSkills();
       return;
     }
     const isModel = state.tab === "model";
@@ -1417,7 +1453,194 @@
     });
   }
 
+  const fileIcon = '<svg viewBox="0 0 16 16" width="14" height="14"><path d="M4 1.8h5l3 3v9.4H4z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/><path d="M9 1.8v3h3" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/></svg>';
+
+  /** 当前目录下的相对路径 */
+  function skillJoin(name) {
+    return state.skillPath ? state.skillPath + "/" + name : name;
+  }
+
+  async function enterSkillDir(path) {
+    state.skillPath = path || "";
+    state.skillFile = null;
+    state.skillCreating = null;
+    await loadConfigs();
+  }
+
+  async function openSkillFile(path) {
+    try {
+      state.skillFile = await Api.skillRead(path);
+      renderSkills();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+
+  function skillSize(bytes) {
+    if (bytes == null) return "";
+    return bytes < 1024 ? bytes + " B" : Math.ceil(bytes / 1024) + " KB";
+  }
+
+  /**
+   * Skills 目录浏览器：面包屑导航、目录/文件列表、新建与文本编辑。
+   */
+  function renderSkills() {
+    const body = $("drawerBody");
+    const entries = state.skillEntries || [];
+    const crumbs = state.skillPath ? state.skillPath.split("/") : [];
+    let html =
+      '<div class="cfg-note">以文件系统方式浏览 skills 目录：点击文件夹进入，点击文件编辑。只有包含 SKILL.md 的技能文件夹会被注入系统提示词。</div>' +
+      '<div class="fs-toolbar"><div class="fs-crumbs">' +
+      '<button type="button" class="fs-crumb" data-path="">skills</button>' +
+      crumbs.map((name, index) =>
+        '<span class="fs-sep">/</span><button type="button" class="fs-crumb" data-path="' +
+        esc(crumbs.slice(0, index + 1).join("/")) + '">' + esc(name) + "</button>").join("") +
+      "</div>" +
+      '<button type="button" class="cfg-new" id="skillNewDir">＋ 文件夹</button>' +
+      '<button type="button" class="cfg-new" id="skillNewFile">＋ 文件</button></div>';
+    body.innerHTML = html;
+
+    for (const crumb of body.querySelectorAll(".fs-crumb")) {
+      crumb.addEventListener("click", () => enterSkillDir(crumb.dataset.path));
+    }
+    if (state.skillCreating) body.appendChild(skillCreateRow());
+    body.appendChild(skillEntryList(entries));
+    if (state.skillFile) renderSkillEditor(body);
+
+    $("skillNewDir").addEventListener("click", () => startSkillCreate("dir"));
+    $("skillNewFile").addEventListener("click", () => startSkillCreate("file"));
+  }
+
+  function skillEntryList(entries) {
+    const list = document.createElement("div");
+    list.className = "fs-list";
+    if (state.skillPath) {
+      list.appendChild(skillRow({ name: "..", path: state.skillParent || "", directory: true, up: true }));
+    }
+    for (const entry of entries) {
+      list.appendChild(skillRow(entry));
+    }
+    if (!entries.length && !state.skillPath) {
+      const empty = document.createElement("div");
+      empty.className = "drawer-empty";
+      empty.textContent = "skills 目录还是空的，先新建文件夹";
+      list.appendChild(empty);
+    } else if (!entries.length && state.skillPath) {
+      const empty = document.createElement("div");
+      empty.className = "drawer-empty";
+      empty.textContent = "空目录";
+      list.appendChild(empty);
+    }
+    return list;
+  }
+
+  function skillRow(entry) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "fs-row";
+    row.innerHTML =
+      '<span class="fs-icon">' + (entry.directory ? wsFolderIcon : fileIcon) + "</span>" +
+      '<span class="fs-name">' + esc(entry.name) + "</span>" +
+      (entry.directory ? "" : '<span class="fs-size">' + skillSize(entry.size) + "</span>") +
+      (entry.up ? "" : '<span class="fs-del" title="删除">×</span>');
+    row.addEventListener("click", () => {
+      if (entry.directory) enterSkillDir(entry.path);
+      else openSkillFile(entry.path);
+    });
+    const remove = row.querySelector(".fs-del");
+    if (remove) {
+      remove.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!confirm("删除「" + entry.name + "」？文件夹会连同内部文件一起删除。")) return;
+        try {
+          await Api.skillDelete(entry.path);
+          if (state.skillFile && state.skillFile.path === entry.path) state.skillFile = null;
+          toast("已删除");
+          await loadConfigs();
+        } catch (err) {
+          toast(err.message, true);
+        }
+      });
+    }
+    return row;
+  }
+
+  function startSkillCreate(kind) {
+    state.skillCreating = kind;
+    renderSkills();
+    const input = $("fsName");
+    if (input) {
+      input.focus();
+      input.select();
+    }
+  }
+
+  function skillCreateRow() {
+    const row = document.createElement("div");
+    row.className = "fs-create";
+    const placeholder = state.skillCreating === "dir" ? "文件夹名称" : "文件名，例如 SKILL.md";
+    row.innerHTML = '<input type="text" id="fsName" placeholder="' + placeholder + '">' +
+      '<button type="button" class="btn btn-primary" id="fsCreateOk">创建</button>' +
+      '<button type="button" class="btn btn-ghost" id="fsCreateCancel">取消</button>';
+    row.querySelector("#fsCreateCancel").addEventListener("click", () => {
+      state.skillCreating = null;
+      renderSkills();
+    });
+    row.querySelector("#fsCreateOk").addEventListener("click", async () => {
+      const name = $("fsName").value.trim();
+      if (!name) {
+        toast("请填写名称", true);
+        return;
+      }
+      const path = skillJoin(name);
+      const kind = state.skillCreating;
+      try {
+        if (kind === "dir") {
+          await Api.skillMkdir(path);
+        } else {
+          await Api.skillWrite(path, "");
+        }
+        state.skillCreating = null;
+        await loadConfigs();
+        if (kind === "file") await openSkillFile(path);
+      } catch (e) {
+        toast(e.message, true);
+      }
+    });
+    return row;
+  }
+
+  function renderSkillEditor(body) {
+    const form = document.createElement("div");
+    form.className = "cfg-form";
+    form.innerHTML =
+      "<h3>编辑：" + esc(state.skillFile.path) + "</h3>" +
+      '<div class="form-row"><textarea id="sfContent" rows="14"></textarea></div>' +
+      '<div class="form-actions"><button class="btn btn-primary" id="sfSave">保存</button>' +
+      '<button class="btn btn-ghost" id="sfClose">关闭</button></div>';
+    body.appendChild(form);
+    const textarea = form.querySelector("#sfContent");
+    textarea.value = state.skillFile.content || "";
+    form.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+    form.querySelector("#sfClose").addEventListener("click", () => {
+      state.skillFile = null;
+      renderSkills();
+    });
+    form.querySelector("#sfSave").addEventListener("click", async () => {
+      try {
+        await Api.skillWrite(state.skillFile.path, textarea.value);
+        state.skillFile.content = textarea.value;
+        toast("已保存");
+      } catch (e) {
+        toast(e.message, true);
+      }
+    });
+  }
+
   $("newChatBtn").addEventListener("click", createSession);
+  $("promptNavBtn").addEventListener("click", () => openDrawer("prompt"));
+  $("skillsNavBtn").addEventListener("click", () => openDrawer("skills"));
   $("workspaceBtn").addEventListener("click", openWorkspacePicker);
   $("approvalBtn").addEventListener("click", (e) => {
     e.stopPropagation();
@@ -1443,7 +1666,7 @@
   });
   $("sendBtn").addEventListener("click", send);
   $("stopBtn").addEventListener("click", stop);
-  $("settingsBtn").addEventListener("click", openDrawer);
+  $("settingsBtn").addEventListener("click", () => openDrawer("model"));
   $("drawerClose").addEventListener("click", closeDrawer);
   $("drawerMask").addEventListener("click", closeDrawer);
   $("sidebarToggle").addEventListener("click", () => $("sidebar").classList.toggle("open"));

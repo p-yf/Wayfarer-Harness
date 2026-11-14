@@ -105,6 +105,13 @@ class CodingToolsTest {
         assertTrue(String.valueOf(result).contains("wayfarer"), String.valueOf(result));
     }
 
+    @Test
+    void 命令中的中文不会被截断() {
+        Object result = call("bash", "{\"command\":\"echo 中文测试\"}");
+
+        assertTrue(String.valueOf(result).contains("中文测试"), String.valueOf(result));
+    }
+
     private Object call(String name, String arguments) {
         return toolCall.call(new ToolCallInfo("call_" + name, name, arguments), context);
     }

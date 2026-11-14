@@ -13,6 +13,8 @@ import com.yf.wayfarer.session.JsonlSession;
 import com.yf.wayfarer.session.Session;
 import com.yf.wayfarer.session.SessionMessage;
 import com.yf.wayfarer.session.UnloadedMessageStore;
+import com.yf.wayfarer.skill.SkillFileSystem;
+import com.yf.wayfarer.skill.SkillStore;
 import com.yf.wayfarer.toolcall.ToolCall;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -161,7 +163,8 @@ class CancelPersistTest {
 
     private Agent agent() {
         return new Agent(model, List.of(), new ToolCall(), null, session,
-                new UnloadedMessageStore(root), MemoryCompactConfig.defaults(), new HitlService(60));
+                new UnloadedMessageStore(root), MemoryCompactConfig.defaults(), new HitlService(60),
+                new SkillStore(new SkillFileSystem(root.resolve("skills"))));
     }
 
     private static Map<String, Object> userContent(String text) {

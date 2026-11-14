@@ -8,7 +8,9 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -45,6 +47,19 @@ public final class SystemPromptStore {
             prompt.append(file.content().strip());
         }
         return prompt.toString();
+    }
+
+    /**
+     * 读取指定 agent 的全部提示词，键为「提示词名称-顺序」，值为内容。
+     */
+    public Map<String, String> loadMap(String agent) {
+        Map<String, String> prompts = new LinkedHashMap<>();
+        for (SystemPromptFile file : list(agent)) {
+            if (!file.content().isBlank()) {
+                prompts.put(file.name() + "-" + file.order(), file.content());
+            }
+        }
+        return prompts;
     }
 
     /**

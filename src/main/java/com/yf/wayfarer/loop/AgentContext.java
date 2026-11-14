@@ -62,9 +62,10 @@ public final class AgentContext implements ToolContext {
     public static final String USER_QUERY = "userquery";
 
     /**
-     * 拼接好的系统提示词，由调用方在运行前写入，模型调用时作为首条 system 消息。
+     * 系统提示词集合，由调用方在运行前写入：键为「提示词名称-顺序」，值为提示词内容。
+     * 模型调用时按顺序拼接后作为首条 system 消息。
      */
-    public static final String SYSTEM_PROMPT = "systemprompt";
+    public static final String SYSTEM_PROMPT = "sysprompt";
 
     /**
      * 当前 agent 名称，由调用方在运行前写入，HITL 确认键与提示词目录都依赖它。
@@ -75,6 +76,12 @@ public final class AgentContext implements ToolContext {
      * 工作区目录，由调用方在运行前写入，文件类工具的相对路径基于它解析。
      */
     public static final String WORKSPACE = "workspace";
+
+    /**
+     * 根工作区目录，由配置指定，其中 skills 目录存放技能文件；
+     * 编码工具对它的权限与工作区一致。
+     */
+    public static final String ROOT_WORKSPACE = "rootWorkspace";
 
     /**
      * 编码工具审批级别，由调用方在运行前写入：all 全部拦截、workspacebased 仅放行工作区内读写、
@@ -251,10 +258,18 @@ public final class AgentContext implements ToolContext {
     }
 
     /**
-     * 拼接好的系统提示词，未设置时为 null。
+     * 系统提示词集合（可变），未设置时为 null。
      */
-    public String systemPrompt() {
-        return get(SYSTEM_PROMPT, String.class);
+    @SuppressWarnings("unchecked")
+    public Map<String, String> systemPrompts() {
+        return (Map<String, String>) get(SYSTEM_PROMPT, Map.class);
+    }
+
+    /**
+     * 根工作区目录，未设置时为 null。
+     */
+    public String rootWorkspace() {
+        return get(ROOT_WORKSPACE, String.class);
     }
 
     /**

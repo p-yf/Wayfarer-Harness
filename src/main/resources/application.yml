@@ -20,6 +20,8 @@ wayfarer:
   # 系统提示词目录：文件名为 agent名称-提示词名称-顺序.md
   prompt:
     root: ./systemprompt
+  # 根工作区：其下 skills 目录存放技能文件，编码工具对它的权限与工作区一致
+  root-workspace: ./
   # 模型配置目录：每个 jsonl 文件一份配置，文件名即配置名称
   model-config:
     root: ./modelconfig

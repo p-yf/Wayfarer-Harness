@@ -111,6 +111,12 @@
       request("PUT", "/api/prompts/" + encodeURIComponent(agent) + "/" + encodeURIComponent(name) + "/" + order, { content: content }),
     deletePrompt: (agent, name, order) =>
       request("DELETE", "/api/prompts/" + encodeURIComponent(agent) + "/" + encodeURIComponent(name) + "/" + order),
+    skillTree: (path) =>
+      request("GET", "/api/skills/tree" + (path ? "?path=" + encodeURIComponent(path) : "")),
+    skillRead: (path) => request("GET", "/api/skills/file?path=" + encodeURIComponent(path)),
+    skillWrite: (path, content) => request("PUT", "/api/skills/file", { path: path, content: content }),
+    skillMkdir: (path) => request("POST", "/api/skills/dir", { path: path }),
+    skillDelete: (path) => request("DELETE", "/api/skills/entry?path=" + encodeURIComponent(path)),
     streamAgent: streamAgent
   };
 })();

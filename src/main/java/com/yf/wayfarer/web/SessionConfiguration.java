@@ -8,6 +8,8 @@ import com.yf.wayfarer.prompt.SystemPromptStore;
 import com.yf.wayfarer.session.JsonlSession;
 import com.yf.wayfarer.session.Session;
 import com.yf.wayfarer.session.UnloadedMessageStore;
+import com.yf.wayfarer.skill.SkillFileSystem;
+import com.yf.wayfarer.skill.SkillStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -46,6 +48,16 @@ public class SessionConfiguration {
     public HitlService hitlService(
             @Value("${wayfarer.hitl.timeout-seconds:300}") long timeoutSeconds) {
         return new HitlService(timeoutSeconds);
+    }
+
+    @Bean
+    public SkillFileSystem skillFileSystem(@Value("${wayfarer.root-workspace:./}") String root) {
+        return new SkillFileSystem(Path.of(root).resolve("skills"));
+    }
+
+    @Bean
+    public SkillStore skillStore(SkillFileSystem files) {
+        return new SkillStore(files);
     }
 
     @Bean

@@ -126,19 +126,33 @@ public class CodingToolApprovalHandler implements ChainHandler {
         if (mode == Mode.NONE) {
             return false;
         }
-        // workspacebased：bash 一律拦截，读写按路径是否位于工作区判断
+        // workspacebased：bash 一律拦截，读写按路径是否位于工作区或根工作区判断
         if ("bash".equals(info.name())) {
             return true;
         }
         Path workspace = workspace(context);
-        if (workspace == null) {
+        Path rootWorkspace = rootWorkspace(context);
+        if (workspace == null && rootWorkspace == null) {
             return true;
         }
-        return !inside(workspace, resolve(workspace, pathArgument(info.arguments())));
+        Path target = resolve(workspace != null ? workspace : rootWorkspace, pathArgument(info.arguments()));
+        return !(inside(workspace, target) || inside(rootWorkspace, target));
     }
 
     private static Path workspace(AgentContext context) {
         String value = context.get(AgentContext.WORKSPACE, String.class);
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Path.of(value).toAbsolutePath().normalize();
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static Path rootWorkspace(AgentContext context) {
+        String value = context.rootWorkspace();
         if (value == null || value.isBlank()) {
             return null;
         }
@@ -182,7 +196,7 @@ public class CodingToolApprovalHandler implements ChainHandler {
      * 目标路径是否位于工作区内。Windows 路径大小写不敏感，比较前统一转小写。
      */
     private static boolean inside(Path workspace, Path target) {
-        if (target == null) {
+        if (workspace == null || target == null) {
             return false;
         }
         String root = comparable(workspace);

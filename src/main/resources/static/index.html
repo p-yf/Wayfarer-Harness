@@ -17,6 +17,16 @@
           新会话
         </button>
       </div>
+      <div class="sidebar-nav">
+        <button class="nav-btn" id="promptNavBtn">
+          <svg viewBox="0 0 16 16" width="14" height="14"><path d="M3 3.5h10M3 8h10M3 12.5h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+          系统提示词
+        </button>
+        <button class="nav-btn" id="skillsNavBtn">
+          <svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/></svg>
+          Skills
+        </button>
+      </div>
       <div class="session-list" id="sessionList"></div>
       <div class="sidebar-foot">
         <span class="foot-dot"></span>基于JSONL
@@ -87,15 +97,14 @@
     <div class="drawer-mask hidden" id="drawerMask"></div>
     <aside class="drawer hidden" id="drawer">
       <div class="drawer-head">
-        <h2>设置</h2>
+        <h2 id="drawerTitle">设置</h2>
         <button class="icon-btn" id="drawerClose" title="关闭">
           <svg viewBox="0 0 16 16" width="16" height="16"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         </button>
       </div>
-      <div class="drawer-tabs">
+      <div class="drawer-tabs" id="drawerTabs">
         <button class="tab active" data-tab="model">模型配置</button>
         <button class="tab" data-tab="compact">记忆压缩</button>
-        <button class="tab" data-tab="prompt">系统提示词</button>
       </div>
       <div class="drawer-body" id="drawerBody"></div>
     </aside>

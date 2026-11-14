@@ -15,7 +15,9 @@ import org.slf4j.LoggerFactory;
 import reactor.core.Disposable;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -126,11 +128,11 @@ public class ModelHandler implements ChainHandler {
     }
 
     /**
-     * 上下文中的系统提示词作为首条 system 消息，不写入消息历史，避免逐轮重复。
+     * 上下文中的系统提示词按「名称-顺序」排序拼接后作为首条 system 消息，不写入消息历史，避免逐轮重复。
      */
     private static List<ChatMessage> requestMessages(AgentContext context) {
         List<ChatMessage> messages = context.messages();
-        String systemPrompt = context.systemPrompt();
+        String systemPrompt = systemPrompt(context);
         if (systemPrompt == null || systemPrompt.isBlank()) {
             return messages;
         }
@@ -138,5 +140,41 @@ public class ModelHandler implements ChainHandler {
         withPrompt.add(new ChatMessage(ChatMessage.Role.SYSTEM, systemPrompt));
         withPrompt.addAll(messages);
         return withPrompt;
+    }
+
+    /**
+     * 按键名末尾的顺序号升序拼接，顺序号缺失的排在最后。
+     */
+    private static String systemPrompt(AgentContext context) {
+        Map<String, String> prompts = context.systemPrompts();
+        if (prompts == null || prompts.isEmpty()) {
+            return null;
+        }
+        List<Map.Entry<String, String>> entries = new ArrayList<>(prompts.entrySet());
+        entries.sort(Comparator.comparingInt(entry -> orderOf(entry.getKey())));
+        StringBuilder system = new StringBuilder();
+        for (Map.Entry<String, String> entry : entries) {
+            String content = entry.getValue();
+            if (content == null || content.isBlank()) {
+                continue;
+            }
+            if (!system.isEmpty()) {
+                system.append("\n\n");
+            }
+            system.append(content.strip());
+        }
+        return system.toString();
+    }
+
+    private static int orderOf(String key) {
+        int separator = key == null ? -1 : key.lastIndexOf('-');
+        if (separator < 0) {
+            return Integer.MAX_VALUE;
+        }
+        try {
+            return Integer.parseInt(key.substring(separator + 1));
+        } catch (NumberFormatException e) {
+            return Integer.MAX_VALUE;
+        }
     }
 }

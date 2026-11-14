@@ -7,6 +7,7 @@ import com.yf.wayfarer.toolcall.ToolParam;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
@@ -89,10 +90,19 @@ public class CodingTools {
             if (!Files.isDirectory(cwd)) {
                 return "错误：工作目录不存在：" + cwd;
             }
-            Process process = new ProcessBuilder(shellCommand(command))
+            Shell shell = shellFor(command);
+            ProcessBuilder builder = new ProcessBuilder(shell.argv())
                     .directory(cwd.toFile())
-                    .redirectErrorStream(true)
-                    .start();
+                    .redirectErrorStream(true);
+            // 统一用 UTF-8 运行，避免中文参数与输出被系统代码页转换
+            builder.environment().putIfAbsent("LANG", "C.UTF-8");
+            Process process = builder.start();
+            // 命令经 stdin 传入：Windows 命令行参数按 ANSI 代码页转换，中文与全角符号会被截断
+            try (OutputStream stdin = process.getOutputStream()) {
+                stdin.write(shell.script().getBytes(StandardCharsets.UTF_8));
+            } catch (IOException e) {
+                // 进程提前退出时写入失败，交给后面的输出与退出码处理
+            }
             // 运行被终止时立刻杀掉子进程树，否则命令会继续在后台执行
             context.onCancel(() -> killTree(process));
             // 输出在独立线程读取，避免进程缓冲区写满后阻塞 waitFor
@@ -226,17 +236,19 @@ public class CodingTools {
 
     /**
      * 组装执行命令：Windows 优先用 Git Bash，Unix 命令与管道才能用；
-     * 找不到 Git Bash 时退回 cmd.exe，并切到 utf-8 代码页避免中文报错乱码。
+     * 找不到 Git Bash 时退回 cmd.exe。命令统一从 stdin 读入，
+     * 绕开 Windows 命令行按 ANSI 代码页转换导致的非 ASCII 字符截断。
      */
-    private static List<String> shellCommand(String command) {
+    private static Shell shellFor(String command) {
         if (!isWindows()) {
-            return List.of("/bin/bash", "-lc", command);
+            return new Shell(List.of("/bin/bash", "-l", "-s"), command + "\n");
         }
         Path bash = gitBash();
         if (bash != null) {
-            return List.of(bash.toString(), "-c", command);
+            return new Shell(List.of(bash.toString(), "-l", "-s"), command + "\n");
         }
-        return List.of("cmd.exe", "/d", "/s", "/c", "chcp 65001>nul & " + command);
+        return new Shell(List.of("cmd.exe", "/d", "/q"),
+                "chcp 65001>nul\r\n" + command + "\r\nexit\r\n");
     }
 
     /**
@@ -406,6 +418,13 @@ public class CodingTools {
             bytes += lineBytes;
         }
         return new Truncation(String.join("\n", kept), true, false, total, kept.size());
+    }
+
+    /**
+     * @author yyf
+     * @description 执行脚本所需的 shell 参数与经 stdin 传入的脚本文本
+     */
+    private record Shell(List<String> argv, String script) {
     }
 
     /**

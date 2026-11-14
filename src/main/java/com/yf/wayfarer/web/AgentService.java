@@ -14,6 +14,7 @@ import com.yf.wayfarer.model.openai.OpenAIChatModel;
 import com.yf.wayfarer.prompt.SystemPromptStore;
 import com.yf.wayfarer.session.Session;
 import com.yf.wayfarer.session.UnloadedMessageStore;
+import com.yf.wayfarer.skill.SkillStore;
 import com.yf.wayfarer.toolcall.ToolCall;
 import com.yf.wayfarer.toolcall.ToolDefinition;
 import org.reactivestreams.Subscription;
@@ -23,6 +24,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -45,6 +47,8 @@ public class AgentService {
     private final ConfigStore<ModelConfig> modelConfigStore;
     private final ConfigStore<MemoryCompactConfig> compactConfigStore;
     private final HitlService hitlService;
+    private final SkillStore skillStore;
+    private final String rootWorkspace;
     private final String apiKey;
     private final String baseUrl;
     private final String model;
@@ -63,6 +67,8 @@ public class AgentService {
                         ConfigStore<ModelConfig> modelConfigStore,
                         ConfigStore<MemoryCompactConfig> compactConfigStore,
                         HitlService hitlService,
+                        SkillStore skillStore,
+                        @Value("${wayfarer.root-workspace:./}") String rootWorkspace,
                         @Value("${wayfarer.model.api-key:}") String apiKey,
                         @Value("${wayfarer.model.base-url:https://api.deepseek.com}") String baseUrl,
                         @Value("${wayfarer.model.name:deepseek-flash}") String model,
@@ -76,6 +82,8 @@ public class AgentService {
         this.modelConfigStore = modelConfigStore;
         this.compactConfigStore = compactConfigStore;
         this.hitlService = hitlService;
+        this.skillStore = skillStore;
+        this.rootWorkspace = Path.of(rootWorkspace).toAbsolutePath().normalize().toString();
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
         this.model = model;
@@ -107,15 +115,15 @@ public class AgentService {
         context.put(AgentContext.SESSION_ID, sessionId);
         context.put(AgentContext.AGENT_NAME, agentName);
 
-        // 运行前加载并拼接系统提示词，作为首条 system 消息
-        String systemPrompt = promptStore.load(agentName);
-        if (!systemPrompt.isBlank()) {
-            context.put(AgentContext.SYSTEM_PROMPT, systemPrompt);
+        // 运行前把系统提示词按「名称-顺序」放入状态，由模型处理器拼接后作为首条 system 消息
+        Map<String, String> prompts = promptStore.loadMap(agentName);
+        if (!prompts.isEmpty()) {
+            context.put(AgentContext.SYSTEM_PROMPT, prompts);
         }
+        context.put(AgentContext.ROOT_WORKSPACE, rootWorkspace);
 
-        log.info("运行开始 sessionId={} agentName={} workspace={} 提示词长度={}",
-                sessionId, agentName, text(payload.get(AgentContext.WORKSPACE)),
-                systemPrompt == null ? 0 : systemPrompt.length());
+        log.info("运行开始 sessionId={} agentName={} workspace={} 提示词条数={}",
+                sessionId, agentName, text(payload.get(AgentContext.WORKSPACE)), prompts.size());
 
         return buildAgent().stream(context)
                 .doOnSubscribe(subscription -> running.put(sessionId, subscription))
@@ -149,7 +157,7 @@ public class AgentService {
         List<ToolDefinition> tools = toolCall.parse(new UnloadTools(unloadedStore), new PlanTools(),
                 new CodingTools());
         return new Agent(chatModel(modelConfig()), tools, toolCall, maxTurns,
-                session, unloadedStore, compactConfig(), hitlService);
+                session, unloadedStore, compactConfig(), hitlService, skillStore);
     }
 
     private ModelConfig modelConfig() {

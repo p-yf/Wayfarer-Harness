@@ -13,6 +13,7 @@ import com.yf.wayfarer.model.ChatModel;
 import com.yf.wayfarer.session.JSONMsgType;
 import com.yf.wayfarer.session.Session;
 import com.yf.wayfarer.session.UnloadedMessageStore;
+import com.yf.wayfarer.skill.SkillStore;
 import com.yf.wayfarer.toolcall.ToolCall;
 import com.yf.wayfarer.toolcall.ToolDefinition;
 import reactor.core.publisher.Flux;
@@ -37,15 +38,17 @@ public class Agent extends Loop {
      * @param unloadedStore 卸载消息存储，压缩时把大消息正文搬入其中
      * @param compact       记忆压缩配置，决定压缩阈值
      * @param hitl          人工确认协调器，编码工具审批时在此等待前端决定
+     * @param skillStore    技能存储，运行前把技能清单注入系统提示词
      */
     public Agent(ChatModel model, List<ToolDefinition> tools, ToolCall toolCall,
                  Integer maxTurns, Session session, UnloadedMessageStore unloadedStore,
-                 MemoryCompactConfig compact, HitlService hitl) {
-        // 模型链：用户请求入历史 → 计划提醒 → 记忆压缩 → 补齐工具结果 → 调用记录 → 步骤持久化 → 模型调用 → 记忆回写
+                 MemoryCompactConfig compact, HitlService hitl, SkillStore skillStore) {
+        // 模型链：用户请求入历史 → 计划提醒 → 记忆压缩 → 技能清单 → 补齐工具结果 → 调用记录 → 步骤持久化 → 模型调用 → 记忆回写
         super(Chain.of(
                 new UserQueryPersistHandler(),
                 new PlanReminderHandler(),
                 new MemoryCompressHandler(model, unloadedStore, compact),
+                new SkillsHandler(skillStore),
                 new ToolResultRepairHandler(),
                 new TraceRecordHandler(),
                 new AssistantAndToolCallPersistHandler(),

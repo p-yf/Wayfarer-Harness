@@ -142,6 +142,25 @@ input, textarea, select { font: inherit; color: var(--text); }
   transition: background 0.15s;
 }
 .new-chat:hover { background: var(--bg-hover); }
+/* 侧边栏功能区：会话列表之上 */
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 8px 8px;
+}
+.nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: background 0.12s, color 0.12s;
+}
+.nav-btn:hover { background: var(--bg-hover); color: var(--text); }
+.nav-btn svg { flex-shrink: 0; }
 .session-list { flex: 1; overflow-y: auto; padding: 2px 8px 12px; }
 .session-item {
   position: relative;
@@ -821,6 +840,58 @@ input, textarea, select { font: inherit; color: var(--text); }
 .cfg-del { margin-left: auto; font-size: 11px; color: var(--text-caption); padding: 3px 8px; border-radius: 5px; }
 .cfg-del:hover { color: var(--red-500); background: var(--danger-bg); }
 .cfg-summary { margin-top: 6px; font-size: 11px; color: var(--text-tertiary); font-family: var(--mono); word-break: break-all; }
+/* Skills 文件浏览器 */
+.fs-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.fs-crumbs { display: flex; align-items: center; gap: 1px; flex-wrap: wrap; flex: 1; min-width: 0; }
+.fs-crumb {
+  padding: 3px 5px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-family: var(--mono);
+  color: var(--text-secondary);
+}
+.fs-crumb:hover { background: var(--bg-hover); color: var(--text); }
+.fs-sep { font-size: 11px; color: var(--text-caption); }
+.fs-list { margin-top: 10px; border: 1px solid var(--border-soft); border-radius: 10px; overflow: hidden; }
+.fs-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.fs-row:last-child { border-bottom: none; }
+.fs-row:hover { background: var(--bg-hover); }
+.fs-icon { display: flex; flex-shrink: 0; color: var(--text-caption); }
+.fs-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-size { font-size: 11px; font-family: var(--mono); color: var(--text-caption); }
+.fs-del {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  color: var(--text-caption);
+  opacity: 0;
+}
+.fs-row:hover .fs-del { opacity: 1; }
+.fs-del:hover { background: var(--danger-bg); color: var(--red-500); }
+.fs-create { display: flex; gap: 6px; margin-top: 10px; }
+.fs-create input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  font-size: 13px;
+}
+.fs-create .btn { padding: 7px 14px; }
 .cfg-form { margin-top: 18px; border-top: 1px solid var(--border-soft); padding-top: 16px; }
 .cfg-form h3 { font-size: 14px; font-weight: 600; margin-bottom: 14px; }
 .form-row { margin-bottom: 12px; }

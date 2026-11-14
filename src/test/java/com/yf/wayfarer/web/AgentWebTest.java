@@ -82,6 +82,7 @@ class AgentWebTest {
                 () -> "http://localhost:" + MODEL_SERVER.getAddress().getPort());
         registry.add("wayfarer.session.root", SESSION_ROOT::toString);
         registry.add("wayfarer.prompt.root", () -> SESSION_ROOT.resolve("prompt").toString());
+        registry.add("wayfarer.root-workspace", () -> SESSION_ROOT.resolve("root").toString());
         registry.add("wayfarer.model-config.root", () -> SESSION_ROOT.resolve("modelconfig").toString());
         registry.add("wayfarer.memory-compact-config.root",
                 () -> SESSION_ROOT.resolve("memorycompactconfig").toString());

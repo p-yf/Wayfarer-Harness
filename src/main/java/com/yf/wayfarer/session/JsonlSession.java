@@ -165,7 +165,7 @@ public final class JsonlSession implements Session {
     public synchronized String fork(String sessionId, String traceId) {
         Path file = resolve(sessionId);
         List<String> lines = readLines(file);
-        int cut = cutAt(parse(lines), traceId);
+        int cut = endAt(parse(lines), traceId);
         String newName = meta(sessionId).name() + "-fork";
         return copy(newName, lines.subList(0, cut));
     }
@@ -306,6 +306,18 @@ public final class JsonlSession implements Session {
         for (int i = 0; i < messages.size(); i++) {
             if (traceId.equals(messages.get(i).traceId())) {
                 return i;
+            }
+        }
+        throw new IllegalArgumentException("会话中不存在 traceId：" + traceId);
+    }
+
+    /**
+     * 分支用：该 trace 最后一条消息之后的位置，使新会话包含当前轮次。
+     */
+    private static int endAt(List<SessionMessage> messages, String traceId) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (traceId.equals(messages.get(i).traceId())) {
+                return i + 1;
             }
         }
         throw new IllegalArgumentException("会话中不存在 traceId：" + traceId);

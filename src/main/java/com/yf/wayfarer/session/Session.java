@@ -78,7 +78,7 @@ public interface Session {
     void reset(String sessionId, String traceId);
 
     /**
-     * 把指定会话中该 trace 之前的消息克隆到新会话，返回新会话 id。
+     * 把指定会话中截至该 trace（含该轮）的消息克隆到新会话，返回新会话 id。
      */
     String fork(String sessionId, String traceId);
 

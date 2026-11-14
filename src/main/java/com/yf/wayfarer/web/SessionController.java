@@ -117,7 +117,7 @@ public class SessionController {
     }
 
     /**
-     * 从指定轮次分支：克隆该轮次之前的全部消息到新会话。
+     * 从指定轮次分支：克隆截至该轮（含该轮）的全部消息到新会话。
      * 卸载内容一并复制，保证新会话里已有的占位符仍能解析到原文。
      */
     @PostMapping("/{sessionId}/fork")

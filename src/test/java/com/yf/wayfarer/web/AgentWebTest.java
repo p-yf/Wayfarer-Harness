@@ -391,7 +391,7 @@ class AgentWebTest {
     }
 
     @Test
-    void 分支会话只保留指定轮次之前的消息并复制卸载内容() {
+    void 分支会话保留指定轮次在内的消息并复制卸载内容() {
         String sessionId = session.create("分支会话");
         String uuid = unloadedStore.save(sessionId, "第一轮的大段日志原文");
         session.append(sessionId, JSONMsgType.USER, "turn-1", userContent("一"));
@@ -411,8 +411,9 @@ class AgentWebTest {
         String forkedId = String.valueOf(forkedBody.get("sessionId"));
 
         List<SessionMessage> forked = session.messages(forkedId);
-        assertEquals(2, forked.size(), "应只保留第一轮的两条消息");
+        assertEquals(4, forked.size(), "应保留到第二轮为止的四条消息");
         assertEquals("turn-1", forked.get(0).traceId());
+        assertEquals("turn-2", forked.get(2).traceId());
         assertEquals("第一轮的大段日志原文", unloadedStore.read(forkedId, uuid),
                 "卸载内容应随分支复制，否则占位符无法解析");
     }

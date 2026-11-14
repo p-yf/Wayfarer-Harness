@@ -17,7 +17,9 @@
 
     <properties>
         <java.version>21</java.version>
+        <maven.compiler.parameters>true</maven.compiler.parameters>
         <openai-java.version>4.101.0</openai-java.version>
+        <jgit.version>7.7.0.202606012155-r</jgit.version>
     </properties>
 
     <dependencies>
@@ -49,6 +51,13 @@
             <artifactId>reactor-test</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- JGit：影子仓库 / 文件变更追踪与回退 -->
+        <dependency>
+            <groupId>org.eclipse.jgit</groupId>
+            <artifactId>org.eclipse.jgit</artifactId>
+            <version>${jgit.version}</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -59,6 +68,8 @@
                 <configuration>
                     <!-- 保留方法参数名，Spring 解析 @RequestParam/@PathVariable 时无需显式写 name -->
                     <parameters>true</parameters>
+                    <!-- 增量编译在某些环境下会丢失 -parameters，这里固定全量编译 -->
+                    <useIncrementalCompilation>false</useIncrementalCompilation>
                 </configuration>
             </plugin>
             <plugin>

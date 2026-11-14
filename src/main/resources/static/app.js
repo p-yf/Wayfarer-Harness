@@ -485,7 +485,7 @@
         const result = await Api.forkSession(state.currentId, block.traceId);
         await loadSessions();
         await openSession(result.sessionId);
-        toast("已从该轮之前分支出新会话");
+        toast("已从该轮分支出新会话");
       } catch (e) {
         toast(e.message, true);
       }
@@ -659,7 +659,7 @@
         '<div class="msg-head"><img class="avatar" src="/favicon.svg" alt="">Wayfarer' +
         (block.traceId
           ? '<div class="msg-actions">' +
-            '<button type="button" data-act="fork" title="从此分支：保留这一轮之前的消息，另开一个会话" aria-label="从此分支">' + forkIcon + "</button>" +
+            '<button type="button" data-act="fork" title="从此分支：保留到这一轮为止的消息，另开一个会话" aria-label="从此分支">' + forkIcon + "</button>" +
             '<button type="button" data-act="reset" title="回退本轮：删除这一轮及之后的全部消息" aria-label="回退本轮">' + resetIcon + "</button>" +
             "</div>"
           : "") +

@@ -116,22 +116,25 @@ class JsonlSessionTest {
     }
 
     @Test
-    void fork只克隆指定轮次之前的消息() {
+    void fork克隆到指定轮次为止的全部消息() {
         Session session = new JsonlSession(root);
         String id = session.create("原始会话");
         session.append(id, JSONMsgType.USER, "turn-1", userContent("一"));
         session.append(id, JSONMsgType.ASSISTANT, "turn-1", assistantContent("一答"));
         session.append(id, JSONMsgType.USER, "turn-2", userContent("二"));
         session.append(id, JSONMsgType.ASSISTANT, "turn-2", assistantContent("二答"));
+        session.append(id, JSONMsgType.USER, "turn-3", userContent("三"));
 
         String forkedId = session.fork(id, "turn-2");
 
         assertNotEquals(id, forkedId);
-        assertEquals(2, session.messages(forkedId).size());
+        assertEquals(4, session.messages(forkedId).size(), "分支应包含当前轮次");
         assertEquals("一", session.messages(forkedId).get(0).content().get("content"));
         assertEquals("一答", session.messages(forkedId).get(1).content().get("content"));
+        assertEquals("二", session.messages(forkedId).get(2).content().get("content"));
+        assertEquals("二答", session.messages(forkedId).get(3).content().get("content"));
         // 原会话不受影响
-        assertEquals(4, session.messages(id).size());
+        assertEquals(5, session.messages(id).size());
     }
 
     @Test

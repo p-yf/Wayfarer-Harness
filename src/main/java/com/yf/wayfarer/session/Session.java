@@ -17,9 +17,19 @@ import java.util.Map;
 public interface Session {
 
     /**
+     * 新建会话时的默认名称，出现第一条用户消息后会替换为该消息内容。
+     */
+    String DEFAULT_NAME = "未命名会话";
+
+    /**
      * 新建会话，返回会话 id。
      */
     String create(String name);
+
+    /**
+     * 修改会话名称，会话 id 与创建时间保持不变。
+     */
+    void rename(String sessionId, String name);
 
     /**
      * 查询会话元数据，等价于按 id 恢复会话。

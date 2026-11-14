@@ -97,7 +97,9 @@
     stopAgent: (id) => request("POST", "/api/agent/stop/" + encodeURIComponent(id)),
     listWorkspace: (path) => request("GET", "/api/workspace/list" + (path ? "?path=" + encodeURIComponent(path) : "")),
     hitlPending: () => request("GET", "/api/hitl/pending"),
-    hitlDecide: (toolCallId, approved) => request("POST", "/api/hitl", { toolCallId: toolCallId, approved: approved }),
+    // decision 形如 {"sheet1": "key1"}，与待确认项 metadata 的页名、选项键一一对应
+    hitlDecide: (toolCallId, decision) =>
+      request("POST", "/api/hitl", Object.assign({ toolCallId }, decision)),
     listModelConfigs: () => request("GET", "/api/model-configs"),
     saveModelConfig: (name, config) => request("PUT", "/api/model-configs/" + encodeURIComponent(name), config),
     deleteModelConfig: (name) => request("DELETE", "/api/model-configs/" + encodeURIComponent(name)),

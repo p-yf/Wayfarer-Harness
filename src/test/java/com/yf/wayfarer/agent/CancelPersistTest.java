@@ -2,6 +2,7 @@ package com.yf.wayfarer.agent;
 
 import com.sun.net.httpserver.HttpServer;
 import com.yf.wayfarer.agent.modelchain.MemoryCompactConfig;
+import com.yf.wayfarer.hitl.HitlService;
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ChatMessage;
@@ -160,7 +161,7 @@ class CancelPersistTest {
 
     private Agent agent() {
         return new Agent(model, List.of(), new ToolCall(), null, session,
-                new UnloadedMessageStore(root), MemoryCompactConfig.defaults());
+                new UnloadedMessageStore(root), MemoryCompactConfig.defaults(), new HitlService(60));
     }
 
     private static Map<String, Object> userContent(String text) {

@@ -40,7 +40,9 @@ public class SessionController {
 
     @PostMapping
     public SessionMeta create(@RequestBody(required = false) Map<String, Object> body) {
-        String name = body == null ? "未命名会话" : String.valueOf(body.getOrDefault("name", "未命名会话"));
+        String name = body == null
+                ? Session.DEFAULT_NAME
+                : String.valueOf(body.getOrDefault("name", Session.DEFAULT_NAME));
         return session.meta(session.create(name));
     }
 

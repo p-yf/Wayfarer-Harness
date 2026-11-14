@@ -9,23 +9,15 @@
   const esc = window.Markdown.escapeHtml;
   const AGENT_NAME = "Wayfarer";
 
-  function loadTitles() {
-    try {
-      return JSON.parse(localStorage.getItem("wayfarer-titles") || "{}");
-    } catch (_) {
-      return {};
-    }
-  }
-
   const state = {
     sessions: [],
+    // 每个会话一份运行视图，流式输出不会因为切换会话而中断或串台
+    views: {},
     currentId: null,
-    blocks: [],
-    running: false,
-    abort: null,
     hitlJson: "[]",
-    toolArgs: {},
-    titles: loadTitles(),
+    hitlPending: [],
+    // 已经提醒过的待确认项，避免轮询重复响铃
+    hitlIds: new Set(),
     tab: "model",
     modelConfigs: {},
     compactConfigs: {},
@@ -34,9 +26,35 @@
     editing: null,
     workspace: "",
     pendingWorkspace: "",
+    // 编码工具审批级别：all 全部拦截、workspacebased 仅放行工作区内读写、no 不拦截
+    approval: "no",
+    pendingApproval: "",
     wsDir: null,
     metadata: {}
   };
+
+  /** 会话视图：块列表、工具入参、运行状态与流式订阅，按会话隔离 */
+  function viewOf(sessionId) {
+    return state.views[sessionId] ||
+      (state.views[sessionId] = { blocks: [], metadata: {}, running: false, loading: null, abort: null });
+  }
+
+  function currentView() {
+    return state.currentId ? viewOf(state.currentId) : null;
+  }
+
+  function currentBlocks() {
+    const view = currentView();
+    return view ? view.blocks : [];
+  }
+
+  function isRunning(view) {
+    return !!(view && view.running);
+  }
+
+  function anyRunning() {
+    return Object.values(state.views).some(isRunning);
+  }
 
   function toast(message, isError) {
     const el = document.createElement("div");
@@ -45,6 +63,63 @@
     $("toastWrap").appendChild(el);
     setTimeout(() => el.remove(), 3600);
   }
+
+  /**
+   * 提醒钩子：agent 执行完毕、执行出错、出现审批时各响一次提示音。
+   * 音频上下文按需创建，首个用户操作之后才可能播放；不支持时静默跳过。
+   */
+  const REMIND_TONES = {
+    done: [880, 1175],
+    error: [440, 330],
+    approval: [1046, 1318]
+  };
+  let audioCtx = null;
+
+  function remind(kind) {
+    const tones = REMIND_TONES[kind];
+    if (!tones) return;
+    try {
+      if (!audioCtx) {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        audioCtx = new Ctx();
+      }
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      const now = audioCtx.currentTime;
+      tones.forEach((freq, index) => {
+        const start = now + index * 0.16;
+        const oscillator = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        oscillator.type = "sine";
+        oscillator.frequency.value = freq;
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.08, start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.14);
+        oscillator.connect(gain).connect(audioCtx.destination);
+        oscillator.start(start);
+        oscillator.stop(start + 0.15);
+      });
+    } catch (_) {
+      // 浏览器不支持或用户未解锁音频时忽略
+    }
+  }
+
+  /**
+   * 首次交互时解锁音频，否则浏览器会把之后异步播放的提示音静音。
+   */
+  function unlockAudio() {
+    try {
+      if (!audioCtx) {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (Ctx) audioCtx = new Ctx();
+      }
+      if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+    } catch (_) {
+      // 忽略不支持音频的环境
+    }
+  }
+  document.addEventListener("pointerdown", unlockAudio, { once: true });
+  document.addEventListener("keydown", unlockAudio, { once: true });
 
   // 自动跟随：只有视图停在底部时，流式新增内容才继续贴底；
   // 用户一旦向上滚开就交出滚动控制权，不再每帧抢回去
@@ -78,14 +153,8 @@
   }
 
   function sessionTitle(meta) {
-    return state.titles[meta.id] || meta.name || "未命名会话";
-  }
-
-  function rememberTitle(id, query) {
-    if (!state.titles[id]) {
-      state.titles[id] = query.length > 30 ? query.slice(0, 30) + "…" : query;
-      localStorage.setItem("wayfarer-titles", JSON.stringify(state.titles));
-    }
+    // 名称由后端维护：新建时是默认名，第一条用户消息后改为该消息内容
+    return meta.name || "未命名会话";
   }
 
   async function loadSessions() {
@@ -106,17 +175,20 @@
     list.innerHTML = "";
     for (const meta of state.sessions) {
       const item = document.createElement("div");
+      const running = isRunning(state.views[meta.id]);
       item.className = "session-item" + (meta.id === state.currentId ? " active" : "");
       item.innerHTML =
         '<div class="s-title">' + esc(sessionTitle(meta)) + '</div>' +
-        '<div class="s-time">' + esc(fmtTime(meta.createdAt)) + '</div>' +
+        '<div class="s-time">' + esc(fmtTime(meta.createdAt)) +
+        (running ? '<span class="s-running" title="正在运行"></span>' : "") +
+        '</div>' +
         '<button class="s-copy" title="复制会话"><svg viewBox="0 0 16 16" width="13" height="13"><rect x="5.2" y="5.2" width="7.6" height="7.6" rx="1.6" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M10.4 3.2H4.6a1.6 1.6 0 0 0-1.6 1.6v5.8" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round"/></svg></button>' +
         '<button class="s-del" title="删除会话"><svg viewBox="0 0 16 16" width="13" height="13"><path d="M3 4h10M6.5 4V2.8h3V4M4.5 4l.6 9h5.8l.6-9M6.8 6.5v4M9.2 6.5v4" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round"/></svg></button>';
       item.addEventListener("click", () => openSession(meta.id));
       item.querySelector(".s-copy").addEventListener("click", async (e) => {
         e.stopPropagation();
-        if (state.running) {
-          toast("正在运行中，请先停止当前任务", true);
+        if (isRunning(state.views[meta.id])) {
+          toast("该会话正在运行中，请先停止", true);
           return;
         }
         try {
@@ -128,30 +200,58 @@
           toast(err.message, true);
         }
       });
-      item.querySelector(".s-del").addEventListener("click", async (e) => {
+      item.querySelector(".s-del").addEventListener("click", (e) => {
         e.stopPropagation();
-        if (!confirm("删除会话「" + sessionTitle(meta) + "」？该操作不可恢复。")) return;
-        try {
-          await Api.deleteSession(meta.id);
-          if (state.currentId === meta.id) {
-            state.currentId = null;
-            state.blocks = [];
-            renderChat();
-          }
-          await loadSessions();
-          toast("会话已删除");
-        } catch (err) {
-          toast(err.message, true);
-        }
+        askDelete(item, meta);
       });
       list.appendChild(item);
     }
   }
 
+  /**
+   * 删除确认直接展开在会话项原位，替代浏览器原生 confirm。
+   */
+  function askDelete(item, meta) {
+    if (item.querySelector(".s-confirm")) return;
+    item.classList.add("confirming");
+    const box = document.createElement("div");
+    box.className = "s-confirm";
+    box.innerHTML = '<span>确定删除？</span>' +
+        '<button type="button" class="s-no">取消</button>'+
+      '<button type="button" class="s-yes">删除</button>';
+    item.appendChild(box);
+    box.addEventListener("click", (e) => e.stopPropagation());
+    box.querySelector(".s-no").addEventListener("click", () => {
+      box.remove();
+      item.classList.remove("confirming");
+    });
+    box.querySelector(".s-yes").addEventListener("click", async () => {
+      const yes = box.querySelector(".s-yes");
+      yes.disabled = true;
+      try {
+        await cancelRun(meta.id);
+        await Api.deleteSession(meta.id);
+        delete state.views[meta.id];
+        if (state.currentId === meta.id) {
+          state.currentId = null;
+          renderSessions();
+          renderHitl(state.hitlPending);
+          renderChat();
+          syncComposer();
+        }
+        await loadSessions();
+        toast("会话已删除");
+      } catch (err) {
+        toast(err.message, true);
+        yes.disabled = false;
+      }
+    });
+  }
+
   async function createSession() {
     try {
       const meta = await Api.createSession("未命名会话");
-      await savePendingWorkspace(meta.id);
+      await savePendingMeta(meta.id);
       await loadSessions();
       await openSession(meta.id);
       inputEl.focus();
@@ -160,36 +260,82 @@
     }
   }
 
-  async function openSession(id) {
-    if (state.running) {
-      toast("正在运行中，请先停止当前任务", true);
-      return;
-    }
+  /**
+   * 切换会话。内存里已有视图（历史消息或正在流式输出）时直接渲染，
+   * 避免重新拉取历史打断正在进行的输出；forceReload 用于 fork/reset 后重读。
+   */
+  async function openSession(id, forceReload) {
+    if (id === state.currentId && !forceReload) return;
     state.currentId = id;
-    state.blocks = [];
-    state.toolArgs = {};
+    const view = viewOf(id);
     renderSessions();
-    renderChat();
+    renderHitl(state.hitlPending);
+    syncComposer();
+    if (!forceReload && (view.blocks.length || view.running)) {
+      applyViewMeta(view);
+      renderChat();
+      scrollChat(true);
+    } else {
+      view.blocks = [];
+      view.toolArgs = {};
+      renderChat();
+      view.loading = loadHistory(id);
+      await view.loading;
+    }
+    if (window.innerWidth <= 900) $("sidebar").classList.remove("open");
+  }
+
+  async function loadHistory(id) {
     try {
-      const meta = await Api.sessionMeta(id);
-      state.metadata = (meta && meta.metadata) || {};
-      state.workspace = state.metadata.workspace || "";
-      renderWorkspace();
-      const messages = await Api.sessionMessages(id);
-      state.blocks = historyToBlocks(messages);
+      const [meta, messages] = await Promise.all([Api.sessionMeta(id), Api.sessionMessages(id)]);
+      const view = viewOf(id);
+      // 历史还没返回就开跑了，以实时视图为准，避免覆盖本轮输出
+      if (view.running) return;
+      view.blocks = historyToBlocks(messages);
+      view.metadata = (meta && meta.metadata) || {};
+      if (state.currentId !== id) return;
+      applyViewMeta(view);
       renderChat();
       scrollChat(true);
     } catch (e) {
       toast(e.message, true);
     }
-    if (window.innerWidth <= 900) $("sidebar").classList.remove("open");
   }
 
+  /** 工作区等元数据跟随当前会话切换 */
+  function applyViewMeta(view) {
+    state.metadata = view.metadata || {};
+    state.workspace = state.metadata.workspace || "";
+    state.approval = state.metadata.approval || "no";
+    renderWorkspace();
+  }
+
+  const WORKSPACE_NAME_MAX = 15;
+  const APPROVAL_LABELS = { all: "全部拦截", workspacebased: "仅工作区内", no: "不拦截" };
+
+  /**
+   * 工作区只展示目录名，最长 15 个字符，完整路径放在 title 里。
+   */
   function renderWorkspace() {
-    const label = $("workspaceName");
-    label.textContent = state.workspace || "未选择工作区";
+    const name = state.workspace ? folderName(state.workspace) : "";
+    $("workspaceName").textContent = name
+      ? (name.length > WORKSPACE_NAME_MAX ? name.slice(0, WORKSPACE_NAME_MAX) + "…" : name)
+      : "工作区选择";
     $("workspaceBtn").title = state.workspace ? "工作区：" + state.workspace : "选择工作区";
     $("workspaceBtn").classList.toggle("set", !!state.workspace);
+    renderApproval();
+  }
+
+  function renderApproval() {
+    $("approvalName").textContent = APPROVAL_LABELS[state.approval] || APPROVAL_LABELS.no;
+    $("approvalBtn").classList.toggle("set", state.approval !== "no");
+    for (const option of $("permMenu").querySelectorAll(".perm-option")) {
+      option.classList.toggle("active", option.dataset.mode === state.approval);
+      // 工作区模式必须先选工作区，否则无法判断路径边界
+      const disabled = option.dataset.mode === "workspacebased" && !state.workspace;
+      option.disabled = disabled;
+      option.classList.toggle("disabled", disabled);
+    }
   }
 
   /**
@@ -271,7 +417,9 @@
       return;
     }
     try {
-      state.metadata = Object.assign({}, state.metadata, { workspace: path });
+      const view = currentView();
+      view.metadata = Object.assign({}, view.metadata, { workspace: path });
+      state.metadata = view.metadata;
       await Api.updateSessionMetadata(state.currentId, state.metadata);
       toast("工作区已保存");
     } catch (e) {
@@ -279,11 +427,38 @@
     }
   }
 
-  async function savePendingWorkspace(sessionId) {
-    if (!state.pendingWorkspace) return;
+  /**
+   * 审批级别随会话元数据保存；还没有会话时先记下，创建会话时一并写入。
+   */
+  async function setApproval(mode) {
+    state.approval = mode;
+    renderApproval();
+    const view = currentView();
+    if (!view) {
+      state.pendingApproval = mode;
+      return;
+    }
+    view.metadata = Object.assign({}, view.metadata, { approval: mode });
+    state.metadata = view.metadata;
     try {
-      await Api.updateSessionMetadata(sessionId, { workspace: state.pendingWorkspace });
+      await Api.updateSessionMetadata(state.currentId, view.metadata);
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+
+  /**
+   * 新会话创建前选择的工作区与审批级别，统一在创建后写入会话元数据。
+   */
+  async function savePendingMeta(sessionId) {
+    const meta = {};
+    if (state.pendingWorkspace) meta.workspace = state.pendingWorkspace;
+    if (state.pendingApproval) meta.approval = state.pendingApproval;
+    if (!Object.keys(meta).length) return;
+    try {
+      await Api.updateSessionMetadata(sessionId, meta);
       state.pendingWorkspace = "";
+      state.pendingApproval = "";
     } catch (e) {
       toast(e.message, true);
     }
@@ -293,11 +468,12 @@
    * 助手消息上的轮次操作：从此分支（fork）或回退本轮（reset）。
    */
   async function messageAction(action, block) {
-    if (state.running) {
-      toast("正在运行中，请先停止当前任务", true);
+    const view = currentView();
+    if (!view || !state.currentId || !block.traceId) return;
+    if (isRunning(view)) {
+      toast("当前会话正在运行中，请先停止", true);
       return;
     }
-    if (!state.currentId || !block.traceId) return;
 
     if (action === "fork") {
       try {
@@ -315,7 +491,7 @@
     if (!confirm("将删除这一轮及之后的全部消息，确定回退？")) return;
     try {
       await Api.resetSession(state.currentId, block.traceId);
-      await openSession(state.currentId);
+      await openSession(state.currentId, true);
       // 把该轮的问题放回输入框，方便改完直接重发
       if (query) inputEl.value = query;
       inputEl.focus();
@@ -326,8 +502,9 @@
   }
 
   function precedingUserText(block) {
-    for (let i = state.blocks.indexOf(block); i >= 0; i--) {
-      if (state.blocks[i].kind === "user") return state.blocks[i].content;
+    const blocks = currentBlocks();
+    for (let i = blocks.indexOf(block); i >= 0; i--) {
+      if (blocks[i].kind === "user") return blocks[i].content;
     }
     return "";
   }
@@ -396,9 +573,9 @@
   /**
    * 同一 trace 只保留一个 Wayfarer 头像块与一组轮次操作。
    */
-  function ensureHead(traceId) {
-    if (state.blocks.some((block) => block.kind === "head" && block.traceId === traceId)) return;
-    pushBlock({ kind: "head", traceId: traceId });
+  function ensureHead(view, traceId) {
+    if (view.blocks.some((block) => block.kind === "head" && block.traceId === traceId)) return;
+    pushBlock(view, { kind: "head", traceId: traceId });
   }
 
   /**
@@ -438,19 +615,19 @@
     return Object.keys(plan).length ? plan : null;
   }
 
-  function lastPlanBlock() {
-    for (let i = state.blocks.length - 1; i >= 0; i--) {
-      if (state.blocks[i].kind === "plan") return state.blocks[i];
+  function lastPlanBlock(view) {
+    for (let i = view.blocks.length - 1; i >= 0; i--) {
+      if (view.blocks[i].kind === "plan") return view.blocks[i];
     }
     return null;
   }
 
-  function applyPlanResult(name, result) {
+  function applyPlanResult(view, name, result) {
     if (!PLAN_TOOLS[name]) return;
     const text = typeof result === "string" ? result : "";
     let plan = parsePlanText(text);
     if (!plan && text.indexOf("计划已清除") >= 0) {
-      const previous = lastPlanBlock();
+      const previous = lastPlanBlock(view);
       if (!previous) return;
       const finished = {};
       for (const key of Object.keys(previous.plan || {})) {
@@ -459,12 +636,12 @@
       plan = finished;
     }
     if (!plan) return;
-    const existing = lastPlanBlock();
+    const existing = lastPlanBlock(view);
     if (existing) {
       existing.plan = plan;
-      swapBlock(existing);
+      swapBlock(view, existing);
     } else {
-      pushBlock({ kind: "plan", plan: plan });
+      pushBlock(view, { kind: "plan", plan: plan });
     }
     scrollChat();
   }
@@ -485,7 +662,7 @@
     } else if (block.kind === "head") {
       el.className = "msg msg-head-block";
       el.innerHTML =
-        '<div class="msg-head"><span class="avatar">W</span>Wayfarer' +
+        '<div class="msg-head"><img class="avatar" src="/favicon.svg" alt="">Wayfarer' +
         (block.traceId
           ? '<div class="msg-actions">' +
             '<button type="button" data-act="fork" title="从此分支：保留这一轮之前的消息，另开一个会话" aria-label="从此分支">' + forkIcon + "</button>" +
@@ -573,21 +750,24 @@
   }
 
   function renderChat() {
+    const blocks = currentBlocks();
     chatInner.innerHTML = "";
-    if (!state.blocks.length) {
+    if (!blocks.length) {
       chatInner.appendChild(emptyStateEl);
       emptyStateEl.classList.remove("hidden");
       return;
     }
-    for (const block of state.blocks) {
+    for (const block of blocks) {
       chatInner.appendChild(renderBlock(block));
     }
     scrollChat();
   }
 
-  function pushBlock(block) {
-    state.blocks.push(block);
-    if (state.blocks.length === 1) chatInner.innerHTML = "";
+  /** 块只挂到当前会话的 DOM；后台会话的流式输出仅累积数据，切回时重建 DOM */
+  function pushBlock(view, block) {
+    view.blocks.push(block);
+    if (view !== currentView()) return block;
+    if (view.blocks.length === 1) chatInner.innerHTML = "";
     chatInner.appendChild(renderBlock(block));
     scrollChat();
     return block;
@@ -597,7 +777,8 @@
    * 就地替换某个块对应的 DOM。renderBlock 会把 block.el 指向新节点，
    * 所以必须先留存旧节点，否则替换会作用在未插入文档的新节点上而静默失效。
    */
-  function swapBlock(block) {
+  function swapBlock(view, block) {
+    if (view !== currentView()) return null;
     const previous = block.el;
     const fresh = renderBlock(block);
     if (previous && previous.parentNode) previous.replaceWith(fresh);
@@ -622,7 +803,8 @@
 
   function paintDirty() {
     for (const block of dirtyBlocks) {
-      if (!block.el) continue;
+      // 已切到别的会话时旧节点已脱离文档，跳过即可，数据仍在块里等切回重建
+      if (!block.el || !block.el.isConnected) continue;
       if (block.kind === "text") {
         const body = block.el.querySelector(".msg-body");
         if (body) body.innerHTML = window.Markdown.render(block.content);
@@ -635,37 +817,37 @@
     scrollChat();
   }
 
-  function handleEvent(name, data) {
+  function handleEvent(view, name, data) {
     if (name === "delta") {
-      let block = state.blocks[state.blocks.length - 1];
+      let block = view.blocks[view.blocks.length - 1];
       if (!block || block.kind !== "text") {
-        ensureHead(data.traceId);
-        block = pushBlock({
+        ensureHead(view, data.traceId);
+        block = pushBlock(view, {
           kind: "text",
           content: "",
           traceId: data.traceId
         });
-        block.el.querySelector(".msg-body").classList.add("cursor-blink");
+        const body = block.el && block.el.querySelector(".msg-body");
+        if (body) body.classList.add("cursor-blink");
       }
       block.content += data.content || "";
       scheduleRender(block);
     } else if (name === "reasoning") {
-      let block = state.blocks[state.blocks.length - 1];
+      let block = view.blocks[view.blocks.length - 1];
       if (!block || block.kind !== "reasoning") {
-        ensureHead(data.traceId);
-        block = pushBlock({ kind: "reasoning", content: "", open: true, traceId: data.traceId });
+        ensureHead(view, data.traceId);
+        block = pushBlock(view, { kind: "reasoning", content: "", open: true, traceId: data.traceId });
       }
       block.content += data.content || "";
       scheduleRender(block);
     } else if (name === "tool_call") {
       const call = data.call || {};
-      state.toolArgs[call.id] = call.arguments || "";
-      ensureHead(data.traceId);
-      pushBlock({ kind: "tool", id: call.id, name: call.name, arguments: call.arguments, result: null, open: true, traceId: data.traceId });
+      ensureHead(view, data.traceId);
+      pushBlock(view, { kind: "tool", id: call.id, name: call.name, arguments: call.arguments, result: null, open: true, traceId: data.traceId });
     } else if (name === "tool_result") {
       let block = null;
-      for (let i = state.blocks.length - 1; i >= 0; i--) {
-        const candidate = state.blocks[i];
+      for (let i = view.blocks.length - 1; i >= 0; i--) {
+        const candidate = view.blocks[i];
         if (candidate.kind === "tool" && candidate.id === data.toolCallId) {
           block = candidate;
           break;
@@ -674,16 +856,18 @@
       if (block) {
         block.result = data.content || "";
         block.open = false;
-        swapBlock(block);
+        swapBlock(view, block);
       } else {
-        pushBlock({ kind: "tool", id: data.toolCallId, name: "工具结果", arguments: null, result: data.content || "", open: false });
+        pushBlock(view, { kind: "tool", id: data.toolCallId, name: "工具结果", arguments: null, result: data.content || "", open: false });
       }
-      applyPlanResult(block ? block.name : "", data.content || "");
+      applyPlanResult(view, block ? block.name : "", data.content || "");
       scrollChat();
     } else if (name === "trace_data") {
       // 每轮模型调用的耗时与用量，后端已持久化为 EXTRADATA
       paintDirty();
-      pushBlock({
+      // 本轮可能只调工具、没有任何文字输出，这里先补头像块，避免耗时行跑到头像上面
+      ensureHead(view, data.traceId);
+      pushBlock(view, {
         kind: "end",
         finishReason: data.finishReason,
         usage: data.usage,
@@ -693,91 +877,125 @@
     } else if (name === "message_end") {
       // 先把待渲染的增量刷出来，再收尾，避免最后一段文字丢失
       paintDirty();
-      for (const block of state.blocks) {
+      for (const block of view.blocks) {
         if (block.kind === "text" && block.el) {
           const body = block.el.querySelector(".msg-body");
           if (body) body.classList.remove("cursor-blink");
         }
-        if (block.kind === "reasoning" && block.el) {
+        if (block.kind === "reasoning") {
           block.open = false;
-          block.el.classList.remove("open");
+          if (block.el) block.el.classList.remove("open");
         }
       }
     } else if (name === "other") {
       if (data && typeof data === "object" && !Array.isArray(data)) {
-        for (const block of customToBlocks(data)) pushBlock(block);
+        for (const block of customToBlocks(data)) pushBlock(view, block);
       } else {
-        pushBlock({ kind: "other", data: data });
+        pushBlock(view, { kind: "other", data: data });
       }
     }
   }
 
-  function setRunning(running) {
-    state.running = running;
+  /** 运行状态记在会话视图上，界面只反映当前会话 */
+  function markRunning(view, running) {
+    view.running = running;
+    renderSessions();
+    syncComposer();
+    if (anyRunning()) startHitlPolling();
+    else stopHitlPolling();
+  }
+
+  function syncComposer() {
+    const running = isRunning(currentView());
     $("sendBtn").classList.toggle("hidden", running);
     $("stopBtn").classList.toggle("hidden", !running);
     inputEl.disabled = running;
     $("composerHint").textContent = running ? "行者 正在工作…" : "";
-    // 只有运行期间才可能有待确认项，空闲时不必轮询
-    if (running) startHitlPolling();
-    else stopHitlPolling();
   }
 
   async function send() {
     const query = inputEl.value.trim();
-    if (!query || state.running) return;
-    if (!state.currentId) {
-      try {
-        const meta = await Api.createSession("未命名会话");
-        state.currentId = meta.id;
-        await savePendingWorkspace(meta.id);
-        state.metadata = Object.assign({}, state.metadata, { workspace: state.workspace });
-        await loadSessions();
-      } catch (e) {
-        toast(e.message, true);
-        return;
-      }
-    }
-    const sessionId = state.currentId;
-    rememberTitle(sessionId, query);
-    renderSessions();
+    if (!query) return;
+    const sessionId = state.currentId || await createSessionForRun();
+    if (!sessionId) return;
+    const view = viewOf(sessionId);
+    if (view.running) return;
+    // 历史还在加载时先等它落地，避免新回合覆盖旧消息
+    if (view.loading) await view.loading;
+
     inputEl.value = "";
     autoResize();
-    pushBlock({ kind: "user", content: query });
-    scrollChat(true);
-    setRunning(true);
-    state.abort = new AbortController();
-    const payload = { sessionId: sessionId, userquery: query, agentName: AGENT_NAME };
+    pushBlock(view, { kind: "user", content: query });
+    if (view === currentView()) scrollChat(true);
+    markRunning(view, true);
+    view.abort = new AbortController();
+    const payload = {
+      sessionId: sessionId,
+      userquery: query,
+      agentName: AGENT_NAME,
+      approval: state.approval || "no"
+    };
     if (state.workspace) payload.workspace = state.workspace;
+    let aborted = false;
+    let failed = false;
     try {
-      await Api.streamAgent(payload, { onEvent: handleEvent }, state.abort.signal);
+      await Api.streamAgent(payload, { onEvent: (name, data) => handleEvent(view, name, data) }, view.abort.signal);
     } catch (e) {
       if (e.name === "AbortError") {
-        pushBlock({ kind: "other", data: "已停止" });
+        aborted = true;
+        pushBlock(view, { kind: "other", data: "已停止" });
       } else {
+        failed = true;
         const detail = e.message.indexOf("未配置模型") >= 0
           ? e.message + "（点右上角「设置」添加并启用一个模型配置）"
           : e.message;
         toast(detail, true);
-        pushBlock({ kind: "other", data: "出错：" + detail });
+        pushBlock(view, { kind: "other", data: "出错：" + detail });
       }
     } finally {
-      chatInner.querySelectorAll(".cursor-blink").forEach((el) => el.classList.remove("cursor-blink"));
-      setRunning(false);
-      state.abort = null;
-      inputEl.focus();
+      if (view === currentView()) {
+        chatInner.querySelectorAll(".cursor-blink").forEach((el) => el.classList.remove("cursor-blink"));
+        inputEl.focus();
+      }
+      view.abort = null;
+      markRunning(view, false);
+      // 提醒钩子：正常结束与出错分别响一次，用户主动终止不打扰
+      if (!aborted) remind(failed ? "error" : "done");
+      // 后端会在第一条消息后自动命名会话，结束后刷新列表拿到新名称
+      loadSessions();
     }
   }
 
-  async function stop() {
-    if (!state.currentId) return;
+  /** 没有当前会话时先建一个，返回新会话 id；失败返回 null */
+  async function createSessionForRun() {
     try {
-      await Api.stopAgent(state.currentId);
+      const meta = await Api.createSession("未命名会话");
+      await savePendingMeta(meta.id);
+      viewOf(meta.id).metadata = Object.assign({}, state.metadata,
+        { workspace: state.workspace, approval: state.approval });
+      await loadSessions();
+      await openSession(meta.id);
+      return meta.id;
+    } catch (e) {
+      toast(e.message, true);
+      return null;
+    }
+  }
+
+  /** 终止指定会话的运行；当前会话的界面由 send 的 finally 收尾 */
+  async function cancelRun(sessionId) {
+    const view = state.views[sessionId];
+    if (!isRunning(view)) return;
+    try {
+      await Api.stopAgent(sessionId);
     } catch (e) {
       toast(e.message, true);
     }
-    if (state.abort) state.abort.abort();
-    setRunning(false);
+    if (view.abort) view.abort.abort();
+  }
+
+  async function stop() {
+    if (state.currentId) await cancelRun(state.currentId);
   }
 
   let hitlTimer = 0;
@@ -785,7 +1003,7 @@
   function startHitlPolling() {
     if (hitlTimer) return;
     pollHitl();
-    hitlTimer = setInterval(pollHitl, 2500);
+    hitlTimer = setInterval(pollHitl, 1200);
   }
 
   function stopHitlPolling() {
@@ -795,6 +1013,7 @@
     }
     // 运行结束后不会有新的待确认项，清掉残留卡片
     state.hitlJson = "";
+    state.hitlIds = new Set();
     renderHitl([]);
   }
 
@@ -808,30 +1027,85 @@
     } catch (_) {}
   }
 
+  const warnIcon = '<svg viewBox="0 0 16 16" width="15" height="15"><path d="M8 1.8L15 14H1z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/><path d="M8 6.2v3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.8" r="0.8" fill="currentColor"/></svg>';
+
+  /**
+   * 后端未带 metadata 时的兜底审批页，保持与编码工具审批一致的允许/拒绝两项。
+   */
+  const DEFAULT_HITL_SHEET = { sheet1: { key1: "允许", key2: "拒绝", style: "radio group" } };
+
+  /**
+   * 审批卡片从页面底部弹出。metadata 的每一页渲染一组单选按钮，
+   * 提交时把「页名 → 选中的键」原样回传，后端据此决定是否放行工具。
+   */
   function renderHitl(pending) {
+    state.hitlPending = pending;
+    // 新出现的待确认项响一次提示音，轮询重绘不重复响
+    const ids = new Set(pending.map((item) => item.toolCallId));
+    if ([...ids].some((id) => !state.hitlIds.has(id))) remind("approval");
+    state.hitlIds = ids;
     const area = $("hitlArea");
     area.innerHTML = "";
-    for (const item of pending) {
-      const card = document.createElement("div");
-      card.className = "hitl-card";
-      const args = item.arguments || state.toolArgs[item.toolCallId] || "";
-      card.innerHTML =
-        '<div class="hitl-title"><span class="warn"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M8 1.8L15 14H1z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/><path d="M8 6.2v3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.8" r="0.8" fill="currentColor"/></svg></span>' +
-        '工具 <b>' + esc(item.toolName || "") + "</b> 请求人工确认</div>" +
-        (args ? '<div class="hitl-args">' + esc(prettyArgs(args)) + "</div>" : "") +
-        '<div class="hitl-actions"><button class="btn btn-approve">批准</button><button class="btn btn-reject">拒绝</button></div>';
-      card.querySelector(".btn-approve").addEventListener("click", () => decide(item.toolCallId, true));
-      card.querySelector(".btn-reject").addEventListener("click", () => decide(item.toolCallId, false));
-      area.appendChild(card);
-    }
+    // 待确认项属于具体会话，切到别的会话时不展示
+    const items = pending.filter((item) => !item.sessionId || item.sessionId === state.currentId);
+    area.classList.toggle("show", items.length > 0);
+    items.forEach((item, index) => area.appendChild(hitlCard(item, index)));
   }
 
-  async function decide(toolCallId, approved) {
+  function hitlCard(item, index) {
+    const card = document.createElement("div");
+    card.className = "hitl-card";
+    const metadata = item.metadata && Object.keys(item.metadata).length
+      ? item.metadata
+      : DEFAULT_HITL_SHEET;
+    const sheetNames = Object.keys(metadata);
+    let sheets = "";
+    for (const sheetName of sheetNames) {
+      const sheet = metadata[sheetName] || {};
+      const radioName = "hitl-" + index + "-" + sheetName;
+      let options = "";
+      for (const [key, label] of Object.entries(sheet)) {
+        if (key === "style") continue;
+        options +=
+          '<label class="hitl-option"><input type="radio" name="' + esc(radioName) + '" value="' + esc(key) + '">' +
+          "<span>" + esc(String(label)) + "</span></label>";
+      }
+      sheets +=
+        '<div class="hitl-sheet" data-sheet="' + esc(sheetName) + '">' +
+        (sheetNames.length > 1 ? '<div class="hitl-sheet-title">' + esc(sheetName) + "</div>" : "") +
+        options + "</div>";
+    }
+    card.innerHTML =
+      '<div class="hitl-title"><span class="warn">' + warnIcon + "</span>工具 <b>" +
+      esc(item.toolName || "") + "</b> 请求确认</div>" +
+      (item.arguments ? '<pre class="hitl-args">' + esc(prettyArgs(item.arguments)) + "</pre>" : "") +
+      sheets +
+      '<div class="hitl-actions"><button class="btn btn-primary hitl-submit">提交</button></div>';
+
+    card.querySelector(".hitl-submit").addEventListener("click", () => {
+      const decision = {};
+      for (const group of card.querySelectorAll(".hitl-sheet")) {
+        const checked = group.querySelector("input:checked");
+        if (!checked) {
+          toast("请先选择「" + group.dataset.sheet + "」", true);
+          return;
+        }
+        decision[group.dataset.sheet] = checked.value;
+      }
+      decide(item.toolCallId, decision, card);
+    });
+    return card;
+  }
+
+  async function decide(toolCallId, decision, card) {
+    const submit = card && card.querySelector(".hitl-submit");
+    if (submit) submit.disabled = true;
     try {
-      await Api.hitlDecide(toolCallId, approved);
-      toast(approved ? "已批准" : "已拒绝");
+      await Api.hitlDecide(toolCallId, decision);
+      toast("已提交审批");
     } catch (e) {
       toast(e.message, true);
+      if (submit) submit.disabled = false;
     }
     state.hitlJson = "";
     pollHitl();
@@ -1145,6 +1419,22 @@
 
   $("newChatBtn").addEventListener("click", createSession);
   $("workspaceBtn").addEventListener("click", openWorkspacePicker);
+  $("approvalBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    renderApproval();
+    $("permMenu").classList.toggle("hidden");
+  });
+  $("permMenu").addEventListener("click", (e) => {
+    const option = e.target.closest(".perm-option");
+    if (!option || option.disabled) return;
+    $("permMenu").classList.add("hidden");
+    setApproval(option.dataset.mode);
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#approvalBtn") && !e.target.closest("#permMenu")) {
+      $("permMenu").classList.add("hidden");
+    }
+  });
   $("wsClose").addEventListener("click", closeWorkspacePicker);
   $("wsMask").addEventListener("click", closeWorkspacePicker);
   $("wsConfirm").addEventListener("click", confirmWorkspace);
@@ -1206,7 +1496,10 @@
   });
 
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeDrawer();
+    if (e.key === "Escape") {
+      closeDrawer();
+      $("permMenu").classList.add("hidden");
+    }
   });
 
   applyTheme(localStorage.getItem("wayfarer-theme") || "light");

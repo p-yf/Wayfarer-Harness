@@ -53,6 +53,12 @@ public class ToolCallHandler implements ChainHandler {
             appendResult(context, info, ToolCircleCheckHandler.BLOCK);
             return;
         }
+        // 人工审批结论由审批处理器提前写入，被拒绝的调用不再执行
+        String denied = CodingToolApprovalHandler.deniedResultOf(context, info.id());
+        if (denied != null) {
+            appendResult(context, info, denied);
+            return;
+        }
         // 工具在执行过程中可据此定位自己的 HITL 等待项
         context.put(AgentContext.TOOL_CALL_ID, info.id());
         context.put(AgentContext.TOOL_NAME, info.name());

@@ -70,6 +70,21 @@ public final class JsonlSession implements Session {
     }
 
     @Override
+    public synchronized void rename(String sessionId, String name) {
+        Path directory = SessionDirectory.resolve(root, sessionId);
+        SessionMeta meta = parseMeta(directory);
+        Path target = root.resolve(SessionDirectory.name(meta.id(), name, meta.createdAt().toEpochMilli()));
+        if (target.equals(directory)) {
+            return;
+        }
+        try {
+            Files.move(directory, target);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    @Override
     public synchronized void updateMetadata(String sessionId, Map<String, Object> content) {
         Path file = resolve(sessionId);
         List<String> lines = readLines(file);

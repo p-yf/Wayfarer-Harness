@@ -77,6 +77,12 @@ public final class AgentContext implements ToolContext {
     public static final String WORKSPACE = "workspace";
 
     /**
+     * 编码工具审批级别，由调用方在运行前写入：all 全部拦截、workspacebased 仅放行工作区内读写、
+     * no 不拦截；缺省视为不拦截。
+     */
+    public static final String APPROVAL = "approval";
+
+    /**
      * 正在执行的工具调用 id，由工具链在调用每个工具前写入，工具据此找到自己的 HITL 等待项。
      */
     public static final String TOOL_CALL_ID = "toolCallId";

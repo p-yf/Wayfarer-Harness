@@ -25,10 +25,12 @@ public final class HitlService {
      * 待确认项。
      *
      * @author yyf
-     * @description 供前端渲染审批卡片所需的上下文
+     * @description 供前端渲染审批卡片所需的上下文；metadata 决定卡片的选项与样式，
+     * 形如 {"sheet1": {"key1": "允许", "key2": "拒绝", "style": "radio group"}}
      */
     public record Pending(String toolCallId, String agentName, String sessionId,
-                          String toolName, String arguments, Instant createdAt) {
+                          String toolName, String arguments, Map<String, Object> metadata,
+                          Instant createdAt) {
     }
 
     private static final String DEFAULT_AGENT = "default";
@@ -54,14 +56,29 @@ public final class HitlService {
         if (toolCallId == null || toolCallId.isBlank()) {
             throw new IllegalStateException("当前没有正在执行的工具调用");
         }
+        return confirm(context, toolCallId, context.toolName(), "", Map.of());
+    }
+
+    /**
+     * 登记一次需要人工确认的工具调用并阻塞等待决定。
+     *
+     * @param arguments 工具入参原文，供审批卡片展示
+     * @param metadata  审批卡片的扩展描述，例如单选按钮组
+     * @return 接口写入的决定；超时或运行被终止时返回 null
+     */
+    public Map<String, Object> confirm(AgentContext context, String toolCallId, String toolName,
+                                       String arguments, Map<String, Object> metadata) {
+        requireText(toolCallId, "toolCallId");
         String agentName = context.get(AgentContext.AGENT_NAME, String.class);
         if (agentName == null || agentName.isBlank()) {
             agentName = DEFAULT_AGENT;
         }
         try {
-            return wait(agentName, context, toolCallId, context.toolName()).block();
+            return wait(agentName, context, toolCallId, toolName,
+                    arguments == null ? "" : arguments,
+                    metadata == null ? Map.of() : metadata).block();
         } catch (RuntimeException e) {
-            // 超时或接口异常：由工具自行判定如何处理
+            // 超时或接口异常：由调用方自行判定如何处理
             return null;
         }
     }
@@ -98,14 +115,14 @@ public final class HitlService {
         return "HITL" + toolCallId;
     }
 
-    private Mono<Map<String, Object>> wait(String agentName, AgentContext context,
-                                           String toolCallId, String toolName) {
+    private Mono<Map<String, Object>> wait(String agentName, AgentContext context, String toolCallId,
+                                           String toolName, String arguments, Map<String, Object> metadata) {
         Sinks.One<Map<String, Object>> sink = Sinks.one();
         if (waiting.putIfAbsent(toolCallId, sink) != null) {
             throw new IllegalStateException("重复的工具调用 id：" + toolCallId);
         }
         pendings.put(toolCallId, new Pending(toolCallId, agentName, context.sessionId(),
-                toolName, "", Instant.now()));
+                toolName, arguments, metadata, Instant.now()));
         context.put(key(toolCallId), sink.asMono());
         // agent 被终止时让等待立即结束，释放被工具占用的线程
         context.onCancel(() -> sink.tryEmitError(new CancellationException("agent 已终止")));

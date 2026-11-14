@@ -6,6 +6,7 @@ import com.yf.wayfarer.tools.CodingTools;
 import com.yf.wayfarer.tools.PlanTools;
 import com.yf.wayfarer.tools.UnloadTools;
 import com.yf.wayfarer.config.ConfigStore;
+import com.yf.wayfarer.hitl.HitlService;
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ModelConfig;
@@ -43,6 +44,7 @@ public class AgentService {
     private final SystemPromptStore promptStore;
     private final ConfigStore<ModelConfig> modelConfigStore;
     private final ConfigStore<MemoryCompactConfig> compactConfigStore;
+    private final HitlService hitlService;
     private final String apiKey;
     private final String baseUrl;
     private final String model;
@@ -60,6 +62,7 @@ public class AgentService {
                         SystemPromptStore promptStore,
                         ConfigStore<ModelConfig> modelConfigStore,
                         ConfigStore<MemoryCompactConfig> compactConfigStore,
+                        HitlService hitlService,
                         @Value("${wayfarer.model.api-key:}") String apiKey,
                         @Value("${wayfarer.model.base-url:https://api.deepseek.com}") String baseUrl,
                         @Value("${wayfarer.model.name:deepseek-flash}") String model,
@@ -72,6 +75,7 @@ public class AgentService {
         this.promptStore = promptStore;
         this.modelConfigStore = modelConfigStore;
         this.compactConfigStore = compactConfigStore;
+        this.hitlService = hitlService;
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
         this.model = model;
@@ -145,7 +149,7 @@ public class AgentService {
         List<ToolDefinition> tools = toolCall.parse(new UnloadTools(unloadedStore), new PlanTools(),
                 new CodingTools());
         return new Agent(chatModel(modelConfig()), tools, toolCall, maxTurns,
-                session, unloadedStore, compactConfig());
+                session, unloadedStore, compactConfig(), hitlService);
     }
 
     private ModelConfig modelConfig() {

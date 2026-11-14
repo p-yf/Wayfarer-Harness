@@ -53,6 +53,21 @@ class JsonlSessionTest {
     }
 
     @Test
+    void 重命名会话保持id与创建时间() {
+        Session session = new JsonlSession(root);
+        String id = session.create("未命名会话");
+        SessionMeta before = session.meta(id);
+
+        session.rename(id, "排查登录失败");
+
+        SessionMeta after = session.meta(id);
+        assertEquals(id, after.id());
+        assertEquals("排查登录失败", after.name());
+        assertEquals(before.createdAt(), after.createdAt());
+        assertTrue(session.messages(id).isEmpty());
+    }
+
+    @Test
     void 按会话id恢复完整会话() {
         Session session = new JsonlSession(root);
         String id = session.create("恢复测试");

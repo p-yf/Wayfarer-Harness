@@ -51,7 +51,11 @@ public class ModelHandler implements ChainHandler {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         Disposable subscription = model.stream(new ChatRequest(messages, tools)).subscribe(
                 chunk -> onChunk(context, chunk),
-                failure::set,
+                // 出错同样要放行本线程，否则链路会一直阻塞在这里
+                error -> {
+                    failure.set(error);
+                    finished.countDown();
+                },
                 finished::countDown);
         // 取消时立即断开模型连接，并唤醒本线程
         context.onCancel(() -> {

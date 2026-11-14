@@ -25,6 +25,8 @@ import com.yf.wayfarer.toolcall.ToolCallInfo;
 import com.yf.wayfarer.toolcall.ToolDefinition;
 import com.yf.wayfarer.model.Usage;
 import okhttp3.Call;
+import okhttp3.OkHttpClient;
+import okhttp3.Protocol;
 import reactor.core.publisher.Flux;
 
 import java.util.List;

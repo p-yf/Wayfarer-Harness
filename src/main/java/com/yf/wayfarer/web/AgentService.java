@@ -174,6 +174,7 @@ public class AgentService {
         }
         synchronized (this) {
             if (chatModel == null || !config.equals(chatModelConfig)) {
+                log.info("模型客户端建立 baseUrl={} model={}", config.baseUrl(), config.model());
                 chatModel = new OpenAIChatModel(config);
                 chatModelConfig = config;
             }

@@ -17,9 +17,6 @@ wayfarer:
   session:
     root: ./sessions
     compact-threshold: 0
-  # 卸载消息目录：每个会话一个 jsonl，文件名为会话 id，内容为 {uuid, content}
-  unload:
-    root: ./unloadedmessage
   # 系统提示词目录：文件名为 agent名称-提示词名称-顺序.md
   prompt:
     root: ./systemprompt

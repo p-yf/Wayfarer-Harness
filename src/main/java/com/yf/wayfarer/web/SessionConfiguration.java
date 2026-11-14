@@ -31,7 +31,8 @@ public class SessionConfiguration {
 
     @Bean
     public UnloadedMessageStore unloadedMessageStore(
-            @Value("${wayfarer.unload.root:./unloadedmessage}") String root) {
+            @Value("${wayfarer.session.root:./sessions}") String root) {
+        // 卸载消息存放在各会话文件夹内，与主消息文件同级
         return new UnloadedMessageStore(Path.of(root));
     }
 

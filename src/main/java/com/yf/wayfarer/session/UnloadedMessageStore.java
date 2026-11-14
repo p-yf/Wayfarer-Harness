@@ -18,12 +18,10 @@ import java.util.stream.Collectors;
  * 卸载消息存储。
  *
  * @author yyf
- * @description 每个会话一个 jsonl 文件，文件名为会话 id，每行一条 {uuid, content}；
- * 压缩时把大消息正文搬到此处，正文位置只保留占位符
+ * @description 卸载内容存放在会话自己的文件夹里，文件名固定为 unloadmessages.jsonl，每行一条 {uuid, content}；
+ * 压缩时把大消息正文搬到此处，正文位置只保留占位符，删除会话时随文件夹一起删除
  */
 public final class UnloadedMessageStore {
-
-    private static final String SUFFIX = ".jsonl";
 
     private final Path root;
     private final ObjectMapper mapper = new ObjectMapper()
@@ -38,9 +36,7 @@ public final class UnloadedMessageStore {
      */
     public synchronized String save(String sessionId, String content) {
         String uuid = UUID.randomUUID().toString();
-        requireSession(sessionId);
         try {
-            Files.createDirectories(root);
             String line = mapper.writeValueAsString(new UnloadedMessage(uuid, content)) + System.lineSeparator();
             Files.writeString(file(sessionId), line, StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE, StandardOpenOption.APPEND);
@@ -93,14 +89,11 @@ public final class UnloadedMessageStore {
      * 使 fork、clone 出来的会话中已有的占位符仍能解析到原文。
      */
     public synchronized void copyAll(String fromSessionId, String toSessionId) {
-        requireSession(fromSessionId);
-        requireSession(toSessionId);
         List<UnloadedMessage> all = messages(fromSessionId);
         if (all.isEmpty()) {
             return;
         }
         try {
-            Files.createDirectories(root);
             Files.writeString(file(toSessionId), serialize(all), StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException e) {
@@ -108,19 +101,7 @@ public final class UnloadedMessageStore {
         }
     }
 
-    /**
-     * 删除会话的全部卸载内容，会话被删除时调用。
-     */
-    public synchronized void deleteAll(String sessionId) {
-        try {
-            Files.deleteIfExists(file(sessionId));
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
     private List<UnloadedMessage> messages(String sessionId) {
-        requireSession(sessionId);
         Path file = file(sessionId);
         if (!Files.exists(file)) {
             return List.of();
@@ -163,13 +144,10 @@ public final class UnloadedMessageStore {
         return content.toString();
     }
 
+    /**
+     * 卸载文件位于会话文件夹内，与主消息文件同级。
+     */
     private Path file(String sessionId) {
-        return root.resolve(sessionId + SUFFIX);
-    }
-
-    private static void requireSession(String sessionId) {
-        if (sessionId == null || sessionId.isBlank()) {
-            throw new IllegalArgumentException("会话 id 不能为空");
-        }
+        return SessionDirectory.resolve(root, sessionId).resolve(SessionDirectory.UNLOADED_FILE);
     }
 }

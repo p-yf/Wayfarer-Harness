@@ -6,6 +6,7 @@ import com.yf.wayfarer.toolcall.ToolCallInfo;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,17 +29,18 @@ class JsonlSessionTest {
     Path root;
 
     @Test
-    void 会话文件按约定规则命名并追加消息() {
+    void 会话按约定规则创建文件夹并在其中写入消息() {
         Session session = new JsonlSession(root);
         String id = session.create("排查错误");
 
         assertTrue(session.messages(id).isEmpty());
 
-        Path file = root.toFile().listFiles()[0].toPath();
-        String fileName = file.getFileName().toString();
-        assertTrue(fileName.startsWith(id + "_"), "文件名应以会话 id 开头：" + fileName);
-        assertTrue(fileName.contains("排查错误"), "文件名应包含会话名称：" + fileName);
-        assertTrue(fileName.endsWith(".jsonl"), "文件名应以 .jsonl 结尾：" + fileName);
+        Path directory = root.toFile().listFiles()[0].toPath();
+        String dirName = directory.getFileName().toString();
+        assertTrue(directory.toFile().isDirectory(), "一个会话应是一个文件夹：" + dirName);
+        assertTrue(dirName.startsWith(id + "_"), "文件夹名应以会话 id 开头：" + dirName);
+        assertTrue(dirName.contains("排查错误"), "文件夹名应包含会话名称：" + dirName);
+        assertTrue(Files.exists(directory.resolve("session.jsonl")), "会话主文件应为 session.jsonl");
 
         session.append(id, JSONMsgType.USER, "turn-1", userContent("查一下日志"));
 

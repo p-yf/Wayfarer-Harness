@@ -246,7 +246,7 @@ class AgentSessionTest {
 
     private Agent agent() {
         return new Agent(model, List.of(), new ToolCall(), null, session,
-                new UnloadedMessageStore(root.resolve("unloaded")), MemoryCompactConfig.defaults());
+                new UnloadedMessageStore(root), MemoryCompactConfig.defaults());
     }
 
     private static Map<String, Object> userContent(String text) {

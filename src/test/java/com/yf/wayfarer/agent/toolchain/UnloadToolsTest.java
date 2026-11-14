@@ -1,6 +1,7 @@
 package com.yf.wayfarer.agent.toolchain;
 
 import com.yf.wayfarer.loop.AgentContext;
+import com.yf.wayfarer.session.JsonlSession;
 import com.yf.wayfarer.session.UnloadedMessageStore;
 import com.yf.wayfarer.toolcall.ToolCall;
 import com.yf.wayfarer.toolcall.ToolCallInfo;
@@ -40,18 +41,20 @@ class UnloadToolsTest {
 
     @Test
     void 按id读回被卸载的原文() {
+        String sessionId = new JsonlSession(root).create("卸载测试");
         UnloadedMessageStore store = new UnloadedMessageStore(root);
-        String uuid = store.save("session-1", "被卸载的完整内容");
+        String uuid = store.save(sessionId, "被卸载的完整内容");
 
-        AgentContext context = new AgentContext().put(AgentContext.SESSION_ID, "session-1");
+        AgentContext context = new AgentContext().put(AgentContext.SESSION_ID, sessionId);
 
         assertEquals("被卸载的完整内容", call(store, context, uuid));
     }
 
     @Test
     void 记录不存在时返回提示() {
+        String sessionId = new JsonlSession(root).create("卸载测试");
         UnloadedMessageStore store = new UnloadedMessageStore(root);
-        AgentContext context = new AgentContext().put(AgentContext.SESSION_ID, "session-1");
+        AgentContext context = new AgentContext().put(AgentContext.SESSION_ID, sessionId);
 
         assertEquals("未找到卸载记录：missing", call(store, context, "missing"));
     }

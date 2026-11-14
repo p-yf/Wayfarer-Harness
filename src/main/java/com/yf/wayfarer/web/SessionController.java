@@ -139,12 +139,11 @@ public class SessionController {
     }
 
     /**
-     * 删除会话，同时清理该会话的卸载消息。
+     * 删除会话，会话文件夹及其中的卸载消息一并删除。
      */
     @DeleteMapping("/{sessionId}")
     public Map<String, Object> delete(@PathVariable String sessionId) {
         session.delete(sessionId);
-        unloadedStore.deleteAll(sessionId);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("sessionId", sessionId);
         result.put("deleted", true);

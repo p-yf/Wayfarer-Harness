@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,13 +24,10 @@ import java.util.stream.Stream;
  * 基于 jsonl 文件的会话存储。
  *
  * @author yyf
- * @description 一个文件代表一个会话，文件名为 id_name_创建时间毫秒.jsonl，每行一条消息；
- * 通过 sessionId 定位文件，达到压缩阈值时追加 COMPACT 快照
+ * @description 一个文件夹代表一个会话，文件夹名为 id_名称_创建时间毫秒，主文件为其中的 session.jsonl，
+ * 每行一条消息；通过 sessionId 定位文件夹，达到压缩阈值时追加 COMPACT 快照
  */
 public final class JsonlSession implements Session {
-
-    private static final String SUFFIX = ".jsonl";
-    private static final String SEPARATOR = "_";
 
     private final Path root;
     private final ObjectMapper mapper;
@@ -54,10 +52,11 @@ public final class JsonlSession implements Session {
         try {
             Files.createDirectories(root);
             String id = UUID.randomUUID().toString();
-            Path file = root.resolve(id + SEPARATOR + sanitize(name) + SEPARATOR
-                    + Instant.now().toEpochMilli() + SUFFIX);
+            Path directory = root.resolve(SessionDirectory.name(id, name, Instant.now().toEpochMilli()));
+            Files.createDirectories(directory);
             // 首行固定是文件元数据：只放任意键值对，不带 messageId 与 traceId
-            Files.writeString(file, metadataLine(Map.of()) + System.lineSeparator(), StandardCharsets.UTF_8,
+            Files.writeString(directory.resolve(SessionDirectory.MAIN_FILE),
+                    metadataLine(Map.of()) + System.lineSeparator(), StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
             return id;
         } catch (IOException e) {
@@ -67,7 +66,7 @@ public final class JsonlSession implements Session {
 
     @Override
     public SessionMeta meta(String sessionId) {
-        return parseMeta(resolve(sessionId));
+        return parseMeta(SessionDirectory.resolve(root, sessionId));
     }
 
     @Override
@@ -94,9 +93,10 @@ public final class JsonlSession implements Session {
         if (!Files.isDirectory(root)) {
             return List.of();
         }
-        try (Stream<Path> files = Files.list(root)) {
-            return files
-                    .filter(path -> path.getFileName().toString().endsWith(SUFFIX))
+        try (Stream<Path> entries = Files.list(root)) {
+            return entries
+                    // 只认含会话主文件的文件夹，避免把同目录下的其他数据目录当成会话
+                    .filter(path -> Files.isRegularFile(path.resolve(SessionDirectory.MAIN_FILE)))
                     .map(this::parseMeta)
                     // 按创建时间倒序，最近的会话在前
                     .sorted((left, right) -> right.createdAt().compareTo(left.createdAt()))
@@ -129,11 +129,8 @@ public final class JsonlSession implements Session {
 
     @Override
     public synchronized void delete(String sessionId) {
-        try {
-            Files.deleteIfExists(resolve(sessionId));
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        // 会话即文件夹，删除整个目录，卸载消息等附属文件一并清理
+        deleteRecursively(SessionDirectory.resolve(root, sessionId));
     }
 
     @Override
@@ -202,11 +199,24 @@ public final class JsonlSession implements Session {
         try {
             Files.createDirectories(root);
             String id = UUID.randomUUID().toString();
-            Path target = root.resolve(id + SEPARATOR + sanitize(newName) + SEPARATOR
-                    + Instant.now().toEpochMilli() + SUFFIX);
-            Files.writeString(target, joinLines(lines), StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            Path directory = root.resolve(SessionDirectory.name(id, newName, Instant.now().toEpochMilli()));
+            Files.createDirectories(directory);
+            Files.writeString(directory.resolve(SessionDirectory.MAIN_FILE), joinLines(lines),
+                    StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
             return id;
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * 递归删除会话文件夹。
+     */
+    private static void deleteRecursively(Path directory) {
+        try (Stream<Path> paths = Files.walk(directory)) {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(path);
+            }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -223,41 +233,21 @@ public final class JsonlSession implements Session {
     }
 
     /**
-     * 按会话 id 定位文件，文件名形如 id_name_创建时间毫秒.jsonl。
+     * 按会话 id 定位主消息文件，会话文件夹名形如 id_名称_创建时间毫秒。
      */
     private Path resolve(String sessionId) {
-        if (sessionId == null || sessionId.isBlank()) {
-            throw new IllegalArgumentException("会话 id 不能为空");
-        }
-        if (!Files.isDirectory(root)) {
-            throw new IllegalArgumentException("会话目录不存在：" + root);
-        }
-        try (Stream<Path> files = Files.list(root)) {
-            List<Path> matched = files
-                    .filter(path -> path.getFileName().toString().startsWith(sessionId + SEPARATOR))
-                    .toList();
-            if (matched.isEmpty()) {
-                throw new IllegalArgumentException("会话不存在：" + sessionId);
-            }
-            if (matched.size() > 1) {
-                throw new IllegalStateException("会话 id 重复：" + sessionId);
-            }
-            return matched.get(0);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        return SessionDirectory.resolve(root, sessionId).resolve(SessionDirectory.MAIN_FILE);
     }
 
-    private SessionMeta parseMeta(Path file) {
-        String fileName = file.getFileName().toString();
-        String base = fileName.substring(0, fileName.length() - SUFFIX.length());
-        int first = base.indexOf(SEPARATOR);
-        int last = base.lastIndexOf(SEPARATOR);
+    private SessionMeta parseMeta(Path directory) {
+        String dirName = directory.getFileName().toString();
+        int first = dirName.indexOf(SessionDirectory.SEPARATOR);
+        int last = dirName.lastIndexOf(SessionDirectory.SEPARATOR);
         return new SessionMeta(
-                base.substring(0, first),
-                base.substring(first + 1, last),
-                Instant.ofEpochMilli(Long.parseLong(base.substring(last + 1))),
-                readMetadata(file));
+                dirName.substring(0, first),
+                dirName.substring(first + 1, last),
+                Instant.ofEpochMilli(Long.parseLong(dirName.substring(last + 1))),
+                readMetadata(directory.resolve(SessionDirectory.MAIN_FILE)));
     }
 
     /**

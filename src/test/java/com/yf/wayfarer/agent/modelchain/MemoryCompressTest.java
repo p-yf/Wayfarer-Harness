@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -76,7 +77,9 @@ class MemoryCompressTest {
                 "deepseek-flash",
                 null,
                 null));
-        store = new UnloadedMessageStore(root.resolve("unloaded"));
+        store = new UnloadedMessageStore(root);
+        // 卸载文件位于会话文件夹内，按会话命名约定先建好目录
+        Files.createDirectories(root.resolve(SESSION + "_压缩测试_" + System.currentTimeMillis()));
     }
 
     @AfterEach

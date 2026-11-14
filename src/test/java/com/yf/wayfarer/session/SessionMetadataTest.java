@@ -30,8 +30,8 @@ class SessionMetadataTest {
         Session session = new JsonlSession(root);
         String id = session.create("元数据会话");
 
-        Path file = root.toFile().listFiles()[0].toPath();
-        List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+        Path directory = root.toFile().listFiles()[0].toPath();
+        List<String> lines = Files.readAllLines(directory.resolve("session.jsonl"), StandardCharsets.UTF_8);
         assertEquals(1, lines.size());
         assertTrue(lines.get(0).startsWith("{\"type\":\"METADATA\""), lines.get(0));
         assertTrue(!lines.get(0).contains("messageId"), "元数据行不应带 messageId：" + lines.get(0));

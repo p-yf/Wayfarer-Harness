@@ -90,11 +90,11 @@ public class SessionController {
     }
 
     /**
-     * 全量消息，用于调试与导出。
+     * 全量消息，用于调试与导出；CUSTOM 是 agent 内部状态快照，不下发到页面。
      */
     @GetMapping("/{sessionId}/messages")
     public List<SessionMessage> messages(@PathVariable String sessionId) {
-        return session.messages(sessionId);
+        return visible(session.messages(sessionId));
     }
 
     /**
@@ -104,7 +104,16 @@ public class SessionController {
     public List<SessionMessage> history(@PathVariable String sessionId,
                                         @RequestParam(required = false) String traceId,
                                         @RequestParam(defaultValue = "3") int turns) {
-        return session.historyBefore(sessionId, traceId, turns);
+        return visible(session.historyBefore(sessionId, traceId, turns));
+    }
+
+    /**
+     * 只保留页面需要渲染的消息类型，内部状态快照不下发。
+     */
+    private static List<SessionMessage> visible(List<SessionMessage> messages) {
+        return messages.stream()
+                .filter(message -> message.type() != JSONMsgType.CUSTOM)
+                .toList();
     }
 
     /**

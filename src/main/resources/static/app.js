@@ -550,8 +550,6 @@
         } else {
           blocks.push({ kind: "tool", id: content.toolCallId, name: "工具结果", arguments: null, result: content.content || "", open: false });
         }
-      } else if (msg.type === "CUSTOM") {
-        blocks.push(...customToBlocks(content));
       } else if (msg.type === "COMPACT") {
         blocks.push({ kind: "compact" });
       } else if (msg.type === "EXTRADATA") {
@@ -581,15 +579,6 @@
   function ensureHead(view, traceId) {
     if (view.blocks.some((block) => block.kind === "head" && block.traceId === traceId)) return;
     pushBlock(view, { kind: "head", traceId: traceId });
-  }
-
-  /**
-   * 自定义状态里只有计划需要上屏；其余键是 agent 的内部状态，不展示。
-   */
-  function customToBlocks(content) {
-    const source = content || {};
-    const plan = source["store:plan"] || source.plan;
-    return plan && typeof plan === "object" ? [{ kind: "plan", plan: plan }] : [];
   }
 
   function prettyArgs(raw) {
@@ -893,9 +882,10 @@
         }
       }
     } else if (name === "other") {
-      if (data && typeof data === "object" && !Array.isArray(data)) {
-        for (const block of customToBlocks(data)) pushBlock(view, block);
-      } else {
+      // 压缩等内部事件用提示条展示，其余非字符串负载忽略
+      if (data && typeof data === "object" && data.type === "compact") {
+        pushBlock(view, { kind: "compact" });
+      } else if (typeof data === "string") {
         pushBlock(view, { kind: "other", data: data });
       }
     }

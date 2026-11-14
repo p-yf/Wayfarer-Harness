@@ -30,6 +30,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -154,6 +155,28 @@ class AgentWebTest {
         assertEquals("turn-2", page[0].traceId());
         assertEquals("问2", page[0].content().get("content"));
         assertEquals("turn-4", page[5].traceId());
+    }
+
+    @Test
+    void 消息接口过滤内部状态快照() {
+        String sessionId = session.create("过滤内部状态");
+        session.append(sessionId, JSONMsgType.USER, "turn-1", userContent("问题"));
+        session.append(sessionId, JSONMsgType.CUSTOM, "turn-1",
+                Map.of("store:plan", Map.of("1", Map.of("content", "计划", "status", "done"))));
+        session.append(sessionId, JSONMsgType.EXTRADATA, "turn-1", Map.of("finishReason", "stop"));
+
+        SessionMessage[] visible = client.get().uri("/api/sessions/{id}/messages", sessionId)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(SessionMessage[].class)
+                .returnResult()
+                .getResponseBody();
+
+        assertTrue(visible != null);
+        assertEquals(2, visible.length, "CUSTOM 不应下发给页面");
+        for (SessionMessage message : visible) {
+            assertNotEquals(JSONMsgType.CUSTOM, message.type());
+        }
     }
 
     @Test

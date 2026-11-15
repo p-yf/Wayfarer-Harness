@@ -12,6 +12,7 @@ import com.yf.wayfarer.loop.modelchain.TraceRecordHandler;
 import com.yf.wayfarer.loop.modelchain.UserQueryPersistHandler;
 import com.yf.wayfarer.loop.toolchain.CodingToolApprovalHandler;
 import com.yf.wayfarer.loop.toolchain.ToolCallHandler;
+import com.yf.wayfarer.loop.toolchain.ToolCallLoopHandler;
 import com.yf.wayfarer.loop.toolchain.ToolCircleCheckHandler;
 import com.yf.wayfarer.hitl.HitlService;
 import com.yf.wayfarer.loop.AgentContext;
@@ -118,11 +119,13 @@ public class Agent extends Loop {
     }
 
     /**
-     * 标准工具链：重复调用检查 → 编码工具审批 → 步骤持久化 → 工具执行
+     * 标准工具链：批量调度 → 单次调用链（重复检查 → 审批 → 执行）
      */
     private static LoopChain defaultToolChain(ToolCall toolCall, HitlService hitl) {
-        return LoopChain.of(new ToolCircleCheckHandler(), new CodingToolApprovalHandler(hitl),
-                new AssistantAndToolCallPersistHandler(), new ToolCallHandler(toolCall));
+        LoopChain single = LoopChain.of(new ToolCircleCheckHandler(),
+                new CodingToolApprovalHandler(hitl), new ToolCallHandler(toolCall));
+        return LoopChain.of(new AssistantAndToolCallPersistHandler(),
+                new ToolCallLoopHandler(single));
     }
 
     /**

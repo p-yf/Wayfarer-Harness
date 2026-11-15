@@ -109,6 +109,48 @@ public final class ShadowRepositoryStore {
     }
 
     /**
+     * 删除某个工作区对应的影子仓库，连同 git-dir 与元数据一并清理。
+     * 只清理变更历史，工作区目录本身不受影响；仓库目录不存在时返回 false。
+     */
+    public boolean deleteWorkspace(String workspace) {
+        if (workspace == null || workspace.isBlank()) {
+            return false;
+        }
+        Path directory;
+        try {
+            directory = Path.of(workspace).toAbsolutePath().normalize();
+        } catch (InvalidPathException e) {
+            log.warn("工作区路径非法，跳过影子仓库删除：{}", workspace);
+            return false;
+        }
+        String key = key(directory);
+        repositories.remove(key);
+        Path target = root.resolve(key);
+        if (!Files.isDirectory(target)) {
+            return false;
+        }
+        try {
+            deleteRecursively(target);
+            log.info("影子仓库已删除 workspace={} dir={}", directory, target);
+            return true;
+        } catch (IOException e) {
+            throw new UncheckedIOException("删除影子仓库失败：" + target, e);
+        }
+    }
+
+    private static void deleteRecursively(Path path) throws IOException {
+        try (Stream<Path> entries = Files.walk(path)) {
+            for (Path entry : entries.sorted(Comparator.reverseOrder()).toList()) {
+                // JGit 写的对象文件是只读的，Windows 上直接删会报拒绝访问，先恢复可写
+                if (!Files.isWritable(entry)) {
+                    entry.toFile().setWritable(true);
+                }
+                Files.deleteIfExists(entry);
+            }
+        }
+    }
+
+    /**
      * 读取或创建某个仓库目录，工作区以 meta.json 为准（重启后路径大小写可能与当时不同）。
      */
     private ShadowRepository create(String key, Path workspace) {

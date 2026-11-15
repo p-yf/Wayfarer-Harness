@@ -2,15 +2,12 @@ package com.yf.wayfarer.loop.toolchain;
 
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.loop.ChainHandler;
-import com.yf.wayfarer.model.ModelResponse;
 import com.yf.wayfarer.toolcall.ToolCallInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -18,8 +15,7 @@ import java.util.Objects;
  *
  * @author yyf
  * @description 按先进先出维护最近 10 次调用的哈希：连续 3 次相同则放行并追加提醒，
- * 连续 5 次相同则短路，直接返回严重警告且不执行工具。
- * 本轮每个调用的判定结果写入上下文，工具执行处理器只消费该结果，不再自行判断
+ * 连续 5 次相同则短路，直接返回严重警告且不执行工具
  */
 public class ToolCircleCheckHandler implements ChainHandler {
 
@@ -31,23 +27,23 @@ public class ToolCircleCheckHandler implements ChainHandler {
     public static final String GUARD = "toolGuard";
 
     /**
-     * 本轮各工具调用的判定结果，键为工具调用 id。
+     * 当前工具调用的判定结果，由本处理器写入，执行处理器读取后决定是否追加提醒。
      */
-    public static final String LEVELS = "toolGuardLevels";
+    public static final String LEVEL = "toolLevel";
 
     public static final String WARN = "<sys-注意：你已经连续三次调用同一个工具了请勿重复调用>";
     public static final String BLOCK = "<sys-严重警告：连续五次调用同一个工具！！禁止执行！！>";
 
     @Override
     public int sort() {
-        // 先于工具执行处理器，保证每次调用都先过检查
+        // 单次调用链最外层：先判定是否允许执行
         return -100;
     }
 
     @Override
     public void run(AgentContext context, Runnable next) {
-        ModelResponse response = context.modelResponse();
-        if (response == null || response.toolCalls().isEmpty()) {
+        ToolCallInfo info = context.currentToolCall();
+        if (info == null) {
             next.run();
             return;
         }
@@ -56,31 +52,27 @@ public class ToolCircleCheckHandler implements ChainHandler {
             guard = new Guard();
             context.put(GUARD, guard);
         }
-        Map<String, Level> levels = new LinkedHashMap<>();
-        for (ToolCallInfo info : response.toolCalls()) {
-            Level level = guard.check(info);
-            levels.put(info.id(), level);
-            switch (level) {
-                case BLOCK -> log.warn("拦截重复工具调用 traceId={} 工具={}", context.traceId(), info.name());
-                case WARN -> log.warn("工具被连续重复调用 traceId={} 工具={}", context.traceId(), info.name());
-                case PASS -> {
-                }
+        Level level = guard.check(info);
+        context.put(LEVEL, level);
+        switch (level) {
+            case BLOCK -> {
+                log.warn("拦截重复工具调用 traceId={} 工具={}", context.traceId(), info.name());
+                ToolCallHandler.appendResult(context, info, BLOCK);
             }
+            case WARN -> {
+                log.warn("工具被连续重复调用 traceId={} 工具={}", context.traceId(), info.name());
+                next.run();
+            }
+            case PASS -> next.run();
         }
-        context.put(LEVELS, levels);
-        next.run();
     }
 
     /**
-     * 取某次调用的判定结果，未经检查时视为放行。
+     * 当前调用的判定结果，未经检查时视为放行。
      */
-    @SuppressWarnings("unchecked")
-    public static Level levelOf(AgentContext context, String toolCallId) {
-        Map<String, Level> levels = context.get(LEVELS, Map.class);
-        if (levels == null) {
-            return Level.PASS;
-        }
-        return levels.getOrDefault(toolCallId, Level.PASS);
+    public static Level levelOf(AgentContext context) {
+        Level level = context.get(LEVEL, Level.class);
+        return level == null ? Level.PASS : level;
     }
 
     /**

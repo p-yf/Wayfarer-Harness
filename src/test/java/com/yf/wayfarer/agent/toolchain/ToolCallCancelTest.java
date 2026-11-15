@@ -2,7 +2,9 @@ package com.yf.wayfarer.agent.toolchain;
 
 import com.yf.wayfarer.loop.modelchain.ToolResultRepairHandler;
 import com.yf.wayfarer.loop.AgentContext;
+import com.yf.wayfarer.loop.LoopChain;
 import com.yf.wayfarer.loop.toolchain.ToolCallHandler;
+import com.yf.wayfarer.loop.toolchain.ToolCallLoopHandler;
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.FinishReason;
 import com.yf.wayfarer.model.ModelResponse;
@@ -38,7 +40,7 @@ class ToolCallCancelTest {
                 FinishReason.TOOL_CALLS,
                 List.of(new ToolCallInfo("call_1", "read", "{\"path\":\"a.txt\"}")), null));
 
-        new ToolCallHandler(toolCall).run(context, () -> {
+        new ToolCallLoopHandler(LoopChain.of(new ToolCallHandler(toolCall))).run(context, () -> {
         });
 
         assertEquals(0, tools.calls, "已终止时不应再执行工具");

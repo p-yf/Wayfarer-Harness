@@ -14,7 +14,9 @@ import com.yf.wayfarer.loop.modelchain.TraceRecordHandler;
 import com.yf.wayfarer.loop.modelchain.UserQueryPersistHandler;
 import com.yf.wayfarer.loop.toolchain.CodingToolApprovalHandler;
 import com.yf.wayfarer.loop.toolchain.ToolCallHandler;
+import com.yf.wayfarer.loop.toolchain.ToolCallLoopHandler;
 import com.yf.wayfarer.loop.toolchain.ToolCircleCheckHandler;
+import com.yf.wayfarer.change.ChangeRecordHandler;
 import com.yf.wayfarer.change.ChangeRecorder;
 import com.yf.wayfarer.agent.agentchain.ChangeSummaryHandler;
 import com.yf.wayfarer.loop.LoopChain;
@@ -188,10 +190,12 @@ public class AgentService {
                 new AssistantAndToolCallPersistHandler(),
                 new ModelHandler(model, tools),
                 new MemoryManageHandler());
-        // 工具链：重复调用检查 → 编码工具审批 → 步骤持久化 → 工具执行（执行前后记录文件变更）
-        LoopChain toolChain = LoopChain.of(new ToolCircleCheckHandler(),
-                new CodingToolApprovalHandler(hitlService), new AssistantAndToolCallPersistHandler(),
-                new ToolCallHandler(toolCall, changeRecorder));
+        // 工具链：批量调度 → 单次调用链（重复检查 → 审批 → 变更记录 → 执行）
+        LoopChain singleToolChain = LoopChain.of(new ToolCircleCheckHandler(),
+                new CodingToolApprovalHandler(hitlService), new ChangeRecordHandler(changeRecorder),
+                new ToolCallHandler(toolCall));
+        LoopChain toolChain = LoopChain.of(new AssistantAndToolCallPersistHandler(),
+                new ToolCallLoopHandler(singleToolChain));
         // 运行级链：主循环结束后把本轮文件变更整体追加到流末尾
         AgentChain agentChain = AgentChain.of(new ChangeSummaryHandler(changeRecorder));
         return new Agent(session, modelChain, toolChain, agentChain, maxTurns);

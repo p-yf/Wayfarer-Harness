@@ -3,6 +3,7 @@ package com.yf.wayfarer.agent.toolchain;
 import com.yf.wayfarer.hitl.HitlService;
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.loop.toolchain.CodingToolApprovalHandler;
+import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.FinishReason;
 import com.yf.wayfarer.model.ModelResponse;
 import com.yf.wayfarer.toolcall.ToolCallInfo;
@@ -16,8 +17,8 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -64,23 +65,24 @@ class CodingToolApprovalHandlerTest {
 
         hitl.complete(pending.toolCallId(), Map.of("sheet1", "key1"));
         join(passed, "允许后链路应继续");
-        assertNull(CodingToolApprovalHandler.deniedResultOf(context, pending.toolCallId()));
+        assertTrue(context.messages().isEmpty(), "允许时不应产生短路结果");
     }
 
     @Test
     @Timeout(10)
-    void 拒绝后写入拒绝结果() {
+    void 拒绝后短路并写入拒绝结果() throws Exception {
         HitlService hitl = new HitlService(5);
         AgentContext context = contextOf("all");
         AtomicBoolean passed = new AtomicBoolean(false);
 
-        run(new CodingToolApprovalHandler(hitl), context, passed);
+        Thread worker = run(new CodingToolApprovalHandler(hitl), context, passed);
 
         HitlService.Pending pending = awaitPending(hitl);
         hitl.complete(pending.toolCallId(), Map.of("sheet1", "key2"));
-        join(passed, "拒绝后链路也应继续，由执行处理器短路");
-        assertEquals(CodingToolApprovalHandler.DENY_RESULT,
-                CodingToolApprovalHandler.deniedResultOf(context, pending.toolCallId()));
+        worker.join(5000);
+        assertFalse(worker.isAlive(), "拒绝后处理器应立即结束");
+        assertFalse(passed.get(), "拒绝后不应进入执行处理器");
+        assertEquals(CodingToolApprovalHandler.DENY_RESULT, lastContent(context));
     }
 
     @Test
@@ -101,7 +103,7 @@ class CodingToolApprovalHandlerTest {
     void 工作区外路径需要审批() {
         HitlService hitl = new HitlService(5);
         AgentContext context = contextOf("workspacebased");
-        context.put(AgentContext.MODEL_RESPONSE, response("read", "{\"path\":\"../outside.txt\"}"));
+        setResponse(context, "read", "{\"path\":\"../outside.txt\"}");
         AtomicBoolean passed = new AtomicBoolean(false);
 
         run(new CodingToolApprovalHandler(hitl), context, passed);
@@ -116,7 +118,7 @@ class CodingToolApprovalHandlerTest {
     void 工作区模式下bash一律需要审批() {
         HitlService hitl = new HitlService(5);
         AgentContext context = contextOf("workspacebased");
-        context.put(AgentContext.MODEL_RESPONSE, response("bash", "{\"command\":\"ls\"}"));
+        setResponse(context, "bash", "{\"command\":\"ls\"}");
         AtomicBoolean passed = new AtomicBoolean(false);
 
         run(new CodingToolApprovalHandler(hitl), context, passed);
@@ -132,7 +134,7 @@ class CodingToolApprovalHandlerTest {
     void 非编码工具不参与审批() {
         HitlService hitl = new HitlService(5);
         AgentContext context = contextOf("all");
-        context.put(AgentContext.MODEL_RESPONSE, response("plan", "{\"items\":[]}"));
+        setResponse(context, "plan", "{\"items\":[]}");
         AtomicBoolean passed = new AtomicBoolean(false);
 
         run(new CodingToolApprovalHandler(hitl), context, passed);
@@ -143,17 +145,18 @@ class CodingToolApprovalHandlerTest {
 
     @Test
     @Timeout(10)
-    void 超时按拒绝处理() {
+    void 超时按拒绝处理() throws Exception {
         HitlService hitl = new HitlService(1);
         AgentContext context = contextOf("all");
         AtomicBoolean passed = new AtomicBoolean(false);
 
-        run(new CodingToolApprovalHandler(hitl), context, passed);
+        Thread worker = run(new CodingToolApprovalHandler(hitl), context, passed);
 
         awaitPending(hitl);
-        join(passed, "超时后链路应继续");
-        assertEquals(CodingToolApprovalHandler.DENY_RESULT,
-                CodingToolApprovalHandler.deniedResultOf(context, "call_1"));
+        worker.join(5000);
+        assertFalse(worker.isAlive(), "超时后处理器应立即结束");
+        assertFalse(passed.get(), "超时按拒绝处理，不应进入执行处理器");
+        assertEquals(CodingToolApprovalHandler.DENY_RESULT, lastContent(context));
     }
 
     private static AgentContext contextOf(String approval) {
@@ -163,8 +166,22 @@ class CodingToolApprovalHandlerTest {
         context.put(AgentContext.APPROVAL, approval);
         context.put(AgentContext.WORKSPACE, workspace().toString());
         context.put(AgentContext.MESSAGES, new ArrayList<>());
-        context.put(AgentContext.MODEL_RESPONSE, response("read", "{\"path\":\"src/Main.java\"}"));
+        setResponse(context, "read", "{\"path\":\"src/Main.java\"}");
         return context;
+    }
+
+    /**
+     * 同时写入模型响应与当前工具调用，供单次调用处理器读取。
+     */
+    private static void setResponse(AgentContext context, String toolName, String arguments) {
+        ModelResponse response = response(toolName, arguments);
+        context.put(AgentContext.MODEL_RESPONSE, response);
+        context.put(AgentContext.CURRENT_TOOL_CALL, response.toolCalls().get(0));
+    }
+
+    private static String lastContent(AgentContext context) {
+        List<ChatMessage> messages = context.messages();
+        return messages.isEmpty() ? null : messages.get(messages.size() - 1).content();
     }
 
     /**
@@ -179,10 +196,11 @@ class CodingToolApprovalHandlerTest {
                 List.of(new ToolCallInfo("call_1", toolName, arguments)), null);
     }
 
-    private static void run(CodingToolApprovalHandler handler, AgentContext context, AtomicBoolean passed) {
+    private static Thread run(CodingToolApprovalHandler handler, AgentContext context, AtomicBoolean passed) {
         Thread worker = new Thread(() -> handler.run(context, () -> passed.set(true)));
         worker.setDaemon(true);
         worker.start();
+        return worker;
     }
 
     private static void join(AtomicBoolean passed, String message) {

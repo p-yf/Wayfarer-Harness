@@ -62,6 +62,13 @@ public final class ChangeService {
     }
 
     /**
+     * 删除工作区对应的影子仓库，仅清理变更历史，工作区目录本身不动。
+     */
+    public boolean deleteWorkspace(String workspace) {
+        return store.deleteWorkspace(workspace);
+    }
+
+    /**
      * 某个提交的 diff；path 为空时返回全部文件。
      */
     public Map<String, Object> diff(String commitId, String path) {

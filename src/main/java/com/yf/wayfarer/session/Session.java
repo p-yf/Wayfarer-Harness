@@ -22,6 +22,11 @@ public interface Session {
     String DEFAULT_NAME = "未命名会话";
 
     /**
+     * 会话元数据中保存工作区绝对路径的键，前端按它把会话归组到工作区下。
+     */
+    String WORKSPACE = "workspace";
+
+    /**
      * 新建会话，返回会话 id。
      */
     String create(String name);

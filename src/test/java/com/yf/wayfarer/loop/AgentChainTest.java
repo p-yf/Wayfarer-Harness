@@ -10,6 +10,7 @@ import com.yf.wayfarer.model.openai.OpenAIChatModel;
 import com.yf.wayfarer.loop.modelchain.MemoryManageHandler;
 import com.yf.wayfarer.loop.modelchain.ModelHandler;
 import com.yf.wayfarer.loop.toolchain.ToolCallHandler;
+import com.yf.wayfarer.loop.toolchain.ToolCallLoopHandler;
 import com.yf.wayfarer.toolcall.Tool;
 import com.yf.wayfarer.toolcall.ToolCall;
 import org.junit.jupiter.api.AfterEach;
@@ -93,7 +94,8 @@ class AgentChainTest {
         toolCall.parse(new LogTools());
 
         LoopChain modelChain = LoopChain.of(new ModelHandler(model, List.of()), new MemoryManageHandler());
-        LoopChain toolChain = LoopChain.of(new ToolCallHandler(toolCall));
+        LoopChain toolChain = LoopChain.of(new ToolCallLoopHandler(
+                LoopChain.of(new ToolCallHandler(toolCall))));
 
         AgentContext context = new AgentContext();
         context.put(AgentContext.TRACE_ID, "trace-1");

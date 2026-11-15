@@ -1,7 +1,9 @@
 package com.yf.wayfarer.agent.toolchain;
 
 import com.yf.wayfarer.loop.AgentContext;
+import com.yf.wayfarer.loop.LoopChain;
 import com.yf.wayfarer.loop.toolchain.ToolCallHandler;
+import com.yf.wayfarer.loop.toolchain.ToolCallLoopHandler;
 import com.yf.wayfarer.loop.toolchain.ToolCircleCheckHandler;
 import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ChatMessage;
@@ -75,9 +77,8 @@ class ToolCircleCheckHandlerTest {
         List<AgentMessage> pushed = new ArrayList<>();
         context.put(AgentContext.AGENT_MSG_SINK, (Consumer<AgentMessage>) pushed::add);
 
-        new ToolCircleCheckHandler().run(context, () -> {
-        });
-        new ToolCallHandler(toolCall).run(context, () -> {
+        new ToolCallLoopHandler(LoopChain.of(new ToolCircleCheckHandler(),
+                new ToolCallHandler(toolCall))).run(context, () -> {
         });
 
         assertEquals(4, tools.calls, "第五次调用不应真正执行");

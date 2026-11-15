@@ -146,7 +146,9 @@ class ToolCallHandlerTest {
         context.put(AgentContext.AGENT_NAME, "wayfarer");
         context.put(AgentContext.MESSAGES, new ArrayList<>(List.of(
                 new ChatMessage(ChatMessage.Role.USER, "执行操作"))));
-        context.put(AgentContext.MODEL_RESPONSE, toolCallResponse(toolName));
+        ModelResponse response = toolCallResponse(toolName);
+        context.put(AgentContext.MODEL_RESPONSE, response);
+        context.put(AgentContext.CURRENT_TOOL_CALL, response.toolCalls().get(0));
         context.put(AgentContext.AGENT_MSG_SINK, (Consumer<AgentMessage>) ignored -> {
         });
         return context;

@@ -85,6 +85,8 @@
     listSessions: () => request("GET", "/api/sessions"),
     createSession: (name) => request("POST", "/api/sessions", { name: name }),
     deleteSession: (id) => request("DELETE", "/api/sessions/" + encodeURIComponent(id)),
+    deleteWorkspace: (workspace) =>
+      request("DELETE", "/api/sessions/workspace?workspace=" + encodeURIComponent(workspace)),
     sessionMessages: (id) => request("GET", "/api/sessions/" + encodeURIComponent(id) + "/messages"),
     sessionMeta: (id) => request("GET", "/api/sessions/" + encodeURIComponent(id)),
     updateSessionMetadata: (id, metadata) =>

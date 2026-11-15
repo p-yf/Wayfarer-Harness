@@ -184,6 +184,9 @@
     }
   }
 
+  /**
+   * 会话按工作区归组展示：工作区相同的会话放在同一组，未设置工作区的会话单独成组并固定排最后。
+   */
   function renderSessions() {
     const list = $("sessionList");
     if (!state.sessions.length) {
@@ -191,39 +194,133 @@
       return;
     }
     list.innerHTML = "";
-    for (const meta of state.sessions) {
-      const item = document.createElement("div");
-      const running = isRunning(state.views[meta.id]);
-      item.className = "session-item" + (meta.id === state.currentId ? " active" : "");
-      item.innerHTML =
-        '<div class="s-title">' + esc(sessionTitle(meta)) + '</div>' +
-        '<div class="s-time">' + esc(fmtTime(meta.createdAt)) +
-        (running ? '<span class="s-running" title="正在运行"></span>' : "") +
-        '</div>' +
-        '<button class="s-copy" title="复制会话"><svg viewBox="0 0 16 16" width="13" height="13"><rect x="5.2" y="5.2" width="7.6" height="7.6" rx="1.6" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M10.4 3.2H4.6a1.6 1.6 0 0 0-1.6 1.6v5.8" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round"/></svg></button>' +
-        '<button class="s-del" title="删除会话"><svg viewBox="0 0 16 16" width="13" height="13"><path d="M3 4h10M6.5 4V2.8h3V4M4.5 4l.6 9h5.8l.6-9M6.8 6.5v4M9.2 6.5v4" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round"/></svg></button>';
-      item.addEventListener("click", () => openSession(meta.id));
-      item.querySelector(".s-copy").addEventListener("click", async (e) => {
-        e.stopPropagation();
-        if (isRunning(state.views[meta.id])) {
-          toast("该会话正在运行中，请先停止", true);
-          return;
-        }
-        try {
-          const result = await Api.cloneSession(meta.id);
-          await loadSessions();
-          await openSession(result.sessionId);
-          toast("已复制为新会话");
-        } catch (err) {
-          toast(err.message, true);
-        }
-      });
-      item.querySelector(".s-del").addEventListener("click", (e) => {
-        e.stopPropagation();
-        askDelete(item, meta);
-      });
-      list.appendChild(item);
+    for (const [workspace, metas] of groupByWorkspace()) {
+      list.appendChild(workspaceGroup(workspace, metas));
     }
+  }
+
+  function workspaceOf(meta) {
+    return String((meta.metadata && meta.metadata.workspace) || "");
+  }
+
+  function groupByWorkspace() {
+    const groups = new Map();
+    for (const meta of state.sessions) {
+      const workspace = workspaceOf(meta);
+      if (!groups.has(workspace)) groups.set(workspace, []);
+      groups.get(workspace).push(meta);
+    }
+    return [...groups.entries()].sort((a, b) => {
+      if (!a[0]) return 1;
+      if (!b[0]) return -1;
+      return folderName(a[0]).localeCompare(folderName(b[0]), "zh-CN");
+    });
+  }
+
+  function workspaceGroup(workspace, metas) {
+    const group = document.createElement("div");
+    group.className = "ws-group";
+    const head = document.createElement("div");
+    head.className = "ws-group-head";
+    head.title = workspace || "未设置工作区";
+    head.innerHTML =
+      '<svg viewBox="0 0 16 16" width="13" height="13"><path d="M1.8 4.2a1 1 0 0 1 1-1h3l1.3 1.4h5.1a1 1 0 0 1 1 1v6.2a1 1 0 0 1-1 1H2.8a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>' +
+      '<span class="ws-group-name">' + esc(workspace ? folderName(workspace) : "未设置工作区") + '</span>' +
+      '<button class="ws-group-add" title="在该工作区新建会话"><svg viewBox="0 0 16 16" width="13" height="13"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>' +
+      '<button class="ws-group-del" title="删除工作区下的会话与变更记录"><svg viewBox="0 0 16 16" width="13" height="13"><path d="M3 4h10M6.5 4V2.8h3V4M4.5 4l.6 9h5.8l.6-9M6.8 6.5v4M9.2 6.5v4" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round"/></svg></button>';
+    head.querySelector(".ws-group-add").addEventListener("click", (e) => {
+      e.stopPropagation();
+      createSession(workspace);
+    });
+    head.querySelector(".ws-group-del").addEventListener("click", (e) => {
+      e.stopPropagation();
+      askDeleteWorkspace(head, workspace, metas);
+    });
+    group.appendChild(head);
+
+    const body = document.createElement("div");
+    body.className = "ws-group-body";
+    for (const meta of metas) {
+      body.appendChild(sessionItem(meta));
+    }
+    group.appendChild(body);
+    return group;
+  }
+
+  /**
+   * 删除工作区的确认直接展开在分组标题下，与单个会话删除的交互保持一致。
+   */
+  function askDeleteWorkspace(head, workspace, metas) {
+    const group = head.parentElement;
+    if (group.querySelector(".ws-confirm")) return;
+    const box = document.createElement("div");
+    box.className = "ws-confirm";
+    box.innerHTML = '<span>删除该工作区下 ' + metas.length + ' 个会话？</span>' +
+      '<button type="button" class="s-no">取消</button>' +
+      '<button type="button" class="s-yes">删除</button>';
+    head.after(box);
+    box.addEventListener("click", (e) => e.stopPropagation());
+    box.querySelector(".s-no").addEventListener("click", () => box.remove());
+    box.querySelector(".s-yes").addEventListener("click", async () => {
+      const yes = box.querySelector(".s-yes");
+      yes.disabled = true;
+      try {
+        for (const meta of metas) {
+          await cancelRun(meta.id);
+        }
+        const removedCurrent = metas.some((meta) => meta.id === state.currentId);
+        for (const meta of metas) {
+          delete state.views[meta.id];
+        }
+        const result = await Api.deleteWorkspace(workspace);
+        if (removedCurrent) {
+          state.currentId = null;
+          applyViewMeta({});
+          renderHitl(state.hitlPending);
+          renderChat();
+          syncComposer();
+        }
+        await loadSessions();
+        toast("已删除 " + result.sessions + " 个会话" + (result.repositoryDeleted ? "及变更记录" : ""));
+      } catch (err) {
+        toast(err.message, true);
+        yes.disabled = false;
+      }
+    });
+  }
+
+  function sessionItem(meta) {
+    const item = document.createElement("div");
+    const running = isRunning(state.views[meta.id]);
+    item.className = "session-item" + (meta.id === state.currentId ? " active" : "");
+    item.innerHTML =
+      '<div class="s-title">' + esc(sessionTitle(meta)) + '</div>' +
+      '<div class="s-time">' + esc(fmtTime(meta.createdAt)) +
+      (running ? '<span class="s-running" title="正在运行"></span>' : "") +
+      '</div>' +
+      '<button class="s-copy" title="复制会话"><svg viewBox="0 0 16 16" width="13" height="13"><rect x="5.2" y="5.2" width="7.6" height="7.6" rx="1.6" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M10.4 3.2H4.6a1.6 1.6 0 0 0-1.6 1.6v5.8" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round"/></svg></button>' +
+      '<button class="s-del" title="删除会话"><svg viewBox="0 0 16 16" width="13" height="13"><path d="M3 4h10M6.5 4V2.8h3V4M4.5 4l.6 9h5.8l.6-9M6.8 6.5v4M9.2 6.5v4" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round"/></svg></button>';
+    item.addEventListener("click", () => openSession(meta.id));
+    item.querySelector(".s-copy").addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (isRunning(state.views[meta.id])) {
+        toast("该会话正在运行中，请先停止", true);
+        return;
+      }
+      try {
+        const result = await Api.cloneSession(meta.id);
+        await loadSessions();
+        await openSession(result.sessionId);
+        toast("已复制为新会话");
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+    item.querySelector(".s-del").addEventListener("click", (e) => {
+      e.stopPropagation();
+      askDelete(item, meta);
+    });
+    return item;
   }
 
   /**
@@ -266,8 +363,12 @@
     });
   }
 
-  async function createSession() {
+  /**
+   * 新建会话。指定 workspace 时直接把新会话归到该工作区下，否则沿用待写入的工作区设置。
+   */
+  async function createSession(workspace) {
     try {
+      if (typeof workspace === "string" && workspace) state.pendingWorkspace = workspace;
       const meta = await Api.createSession("未命名会话");
       await savePendingMeta(meta.id);
       await loadSessions();
@@ -1311,12 +1412,12 @@
     const isModel = state.tab === "model";
     const configs = isModel ? state.modelConfigs : state.compactConfigs;
     const names = Object.keys(configs || {}).sort();
+    const help = isModel
+      ? "配置以 JSONL 文件保存在 modelconfig 目录，运行时读取第一个「已启用」的配置。"
+      : "配置以 JSONL 文件保存在 memorycompactconfig 目录，运行时读取第一个「已启用」的配置，全部未启用时使用内置默认值。触发条件是估算 token 超过「上下文窗口 × 触发比例」，默认 128000 × 0.7，想验证效果可把窗口调小，例如 2000。";
     let html =
-      '<div class="cfg-note">' +
-      (isModel
-        ? "配置以 JSONL 文件保存在 modelconfig 目录。运行时读取第一个「已启用」的配置；全部未启用时回退到 application.yml。"
-        : "配置以 JSONL 文件保存在 memorycompactconfig 目录。运行时读取第一个「已启用」的配置；全部未启用时使用内置默认值。触发条件是估算 token 超过「上下文窗口 × 触发比例」，默认 128000 × 0.7 需要很长的对话才会触发，想验证效果可把窗口调小，例如 2000。") +
-      '</div><div class="cfg-toolbar"><span class="cfg-note" style="margin:0">共 ' + names.length + ' 个配置</span>' +
+      '<div class="cfg-toolbar"><span class="cfg-note" style="margin:0">共 ' + names.length +
+      ' 个配置<span class="help-tip" title="' + esc(help) + '">?</span></span>' +
       '<button class="cfg-new" id="cfgNew">＋ 新建配置</button></div>';
 
     if (!names.length) html += '<div class="panel-empty">暂无配置，点击「新建配置」创建</div>';
@@ -1435,9 +1536,9 @@
   function renderPrompts() {
     const body = $("panelBody");
     const prompts = state.prompts || [];
+    const help = "保存在 systemprompt 目录，按顺序拼接后作为模型的首条 system 消息。当前 agent：" + AGENT_NAME;
     let html =
-      '<div class="cfg-note">系统提示词以「agent名称-提示词名称-顺序.md」保存在 systemprompt 目录，按顺序拼接后作为模型的首条 system 消息。当前 agent：' +
-      esc(AGENT_NAME) + "</div>" +
+      '<div class="cfg-note">系统提示词以「agent名称-提示词名称-顺序.md」<span class="help-tip" title="' + esc(help) + '">?</span></div>' +
       '<div class="cfg-toolbar"><span class="cfg-note" style="margin:0">共 ' + prompts.length + " 个提示词</span>" +
       '<button class="cfg-new" id="promptNew">＋ 新建提示词</button></div>';
     if (!prompts.length) html += '<div class="panel-empty">暂无提示词，点击「新建提示词」创建</div>';
@@ -1569,8 +1670,9 @@
     const body = $("panelBody");
     const entries = state.skillEntries || [];
     const crumbs = state.skillPath ? state.skillPath.split("/") : [];
+    const help = "以文件系统方式浏览 skills 目录：点击文件夹进入，点击文件编辑。只有包含 SKILL.md 的技能文件夹会被注入系统提示词。";
     let html =
-      '<div class="cfg-note">以文件系统方式浏览 skills 目录：点击文件夹进入，点击文件编辑。只有包含 SKILL.md 的技能文件夹会被注入系统提示词。</div>' +
+      '<div class="cfg-note">skills 目录<span class="help-tip" title="' + esc(help) + '">?</span></div>' +
       '<div class="fs-toolbar"><div class="fs-crumbs">' +
       '<button type="button" class="fs-crumb" data-path="">skills</button>' +
       crumbs.map((name, index) =>

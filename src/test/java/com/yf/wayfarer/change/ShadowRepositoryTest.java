@@ -13,6 +13,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -32,6 +33,7 @@ class ShadowRepositoryTest {
     Path temp;
 
     private Path workspace;
+    private ShadowRepositoryStore store;
     private ShadowRepository repository;
 
     @BeforeEach
@@ -42,11 +44,27 @@ class ShadowRepositoryTest {
         Files.createDirectories(workspace.resolve("target"));
         Files.writeString(workspace.resolve("target/ignored.txt"), "x", StandardCharsets.UTF_8);
 
-        ShadowRepositoryStore store = new ShadowRepositoryStore(
+        store = new ShadowRepositoryStore(
                 temp.resolve("shadow"), List.of(".git", ".wayfarer", "target", "sessions"), true);
         repository = store.forWorkspace(workspace.toString());
         assertNotNull(repository);
         repository.ensure();
+    }
+
+    @Test
+    void 删除工作区会清理影子仓库但保留工作区文件() throws IOException {
+        assertTrue(store.deleteWorkspace(workspace.toString()), "已建立的影子仓库应被删除");
+        try (Stream<Path> entries = Files.list(temp.resolve("shadow"))) {
+            assertEquals(0, entries.count(), "影子仓库目录应被清空");
+        }
+        assertTrue(Files.isRegularFile(workspace.resolve("a.txt")), "工作区文件不应受影响");
+        assertFalse(store.deleteWorkspace(workspace.toString()), "仓库不存在时不应报告删除成功");
+
+        // 再次访问同一工作区会按基线重新建库，说明旧历史已随之清理
+        ShadowRepository recreated = store.forWorkspace(workspace.toString());
+        assertNotNull(recreated);
+        recreated.ensure();
+        assertEquals(1, recreated.commits().size(), "重建后只应有基线提交");
     }
 
     @Test

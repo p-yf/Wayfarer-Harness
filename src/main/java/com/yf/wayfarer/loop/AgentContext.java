@@ -4,6 +4,7 @@ import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.ModelResponse;
 import com.yf.wayfarer.session.Session;
+import com.yf.wayfarer.toolcall.ToolCallInfo;
 import com.yf.wayfarer.toolcall.ToolContext;
 
 import java.util.LinkedHashMap;
@@ -88,6 +89,11 @@ public final class AgentContext implements ToolContext {
      * no 不拦截；缺省视为不拦截。
      */
     public static final String APPROVAL = "approval";
+
+    /**
+     * 当前正在处理的工具调用，由工具调度处理器在进入单次调用链前写入，批量结束后移除。
+     */
+    public static final String CURRENT_TOOL_CALL = "currentToolCall";
 
     /**
      * 正在执行的工具调用 id，由工具链在调用每个工具前写入，工具据此找到自己的 HITL 等待项。
@@ -241,6 +247,13 @@ public final class AgentContext implements ToolContext {
      */
     public Integer turnIndex() {
         return get(TURN_INDEX, Integer.class);
+    }
+
+    /**
+     * 当前正在处理的工具调用，未进入单次调用链或批量结束后为 null。
+     */
+    public ToolCallInfo currentToolCall() {
+        return get(CURRENT_TOOL_CALL, ToolCallInfo.class);
     }
 
     /**

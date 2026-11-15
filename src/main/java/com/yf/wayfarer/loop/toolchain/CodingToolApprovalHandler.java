@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yf.wayfarer.hitl.HitlService;
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.loop.ChainHandler;
-import com.yf.wayfarer.model.ModelResponse;
 import com.yf.wayfarer.toolcall.ToolCallInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,17 +21,15 @@ import java.util.Set;
  * @author yyf
  * @description 按上下文中的审批级别决定是否需要人工确认：all 全部拦截，
  * workspacebased 只放行工作区内的 read/edit/write（bash 与工作区外路径都拦截），no 不拦截。
- * 需要确认时在此阻塞等待前端提交决定，被拒绝的调用写入上下文，由工具执行处理器直接返回拒绝结果
+ * 需要确认时在此阻塞等待前端提交决定，被拒绝的调用直接返回拒绝结果并短路，不再进入执行
  */
 public class CodingToolApprovalHandler implements ChainHandler {
 
     private static final Logger log = LoggerFactory.getLogger(CodingToolApprovalHandler.class);
 
     /**
-     * 被拒绝的工具调用结果，键为工具调用 id。
+     * 被拒绝的工具调用结果。
      */
-    public static final String DENIED = "approvalDenied";
-
     public static final String DENY_RESULT = "<sys-用户拒绝了本次工具调用，请勿重复尝试相同操作>";
 
     private static final Set<String> CODING_TOOLS = Set.of("read", "bash", "edit", "write");
@@ -55,35 +52,18 @@ public class CodingToolApprovalHandler implements ChainHandler {
 
     @Override
     public void run(AgentContext context, Runnable next) {
-        ModelResponse response = context.modelResponse();
-        if (response != null && !response.toolCalls().isEmpty()) {
-            review(context, response);
-        }
-        next.run();
-    }
-
-    /**
-     * 逐个判断本轮调用，需要确认的在此等待前端决定。
-     */
-    private void review(AgentContext context, ModelResponse response) {
+        ToolCallInfo info = context.currentToolCall();
         Mode mode = Mode.of(context.get(AgentContext.APPROVAL, String.class));
-        if (mode == Mode.NONE) {
+        if (info == null || mode == Mode.NONE || !requiresApproval(context, mode, info)) {
+            next.run();
             return;
         }
-        Map<String, String> denied = new LinkedHashMap<>();
-        for (ToolCallInfo info : response.toolCalls()) {
-            if (!requiresApproval(context, mode, info)) {
-                continue;
-            }
-            if (approved(context, info)) {
-                continue;
-            }
-            denied.put(info.id(), DENY_RESULT);
-            log.info("工具调用被拒绝 traceId={} 工具={}", context.traceId(), info.name());
+        if (approved(context, info)) {
+            next.run();
+            return;
         }
-        if (!denied.isEmpty()) {
-            context.put(DENIED, denied);
-        }
+        log.info("工具调用被拒绝 traceId={} 工具={}", context.traceId(), info.name());
+        ToolCallHandler.appendResult(context, info, DENY_RESULT);
     }
 
     private boolean approved(AgentContext context, ToolCallInfo info) {
@@ -105,15 +85,6 @@ public class CodingToolApprovalHandler implements ChainHandler {
         sheet.put(DENY_KEY, "拒绝");
         sheet.put("style", "radio group");
         return Map.of(SHEET, sheet);
-    }
-
-    /**
-     * 取某次调用被拒绝时返回给模型的内容，未拒绝时为 null。
-     */
-    @SuppressWarnings("unchecked")
-    public static String deniedResultOf(AgentContext context, String toolCallId) {
-        Map<String, String> denied = context.get(DENIED, Map.class);
-        return denied == null ? null : denied.get(toolCallId);
     }
 
     private static boolean requiresApproval(AgentContext context, Mode mode, ToolCallInfo info) {

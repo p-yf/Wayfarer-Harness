@@ -191,6 +191,26 @@ public class SessionController {
         return result;
     }
 
+    /**
+     * 删除一个工作区：该工作区下的全部会话与其影子仓库一并清理，工作区目录本身不动。
+     */
+    @DeleteMapping("/workspace")
+    public Map<String, Object> deleteWorkspace(@RequestParam("workspace") String workspace) {
+        List<SessionMeta> targets = session.list().stream()
+                .filter(meta -> workspace.equals(String.valueOf(
+                        meta.metadata().getOrDefault(Session.WORKSPACE, ""))))
+                .toList();
+        for (SessionMeta meta : targets) {
+            session.delete(meta.id());
+        }
+        boolean repositoryDeleted = changeService.deleteWorkspace(workspace);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("workspace", workspace);
+        result.put("sessions", targets.size());
+        result.put("repositoryDeleted", repositoryDeleted);
+        return result;
+    }
+
     private static Map<String, Object> idResult(String sessionId) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("sessionId", sessionId);

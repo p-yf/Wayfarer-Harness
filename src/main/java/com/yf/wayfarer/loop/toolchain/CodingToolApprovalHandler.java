@@ -47,7 +47,7 @@ public class CodingToolApprovalHandler implements ChainHandler {
     @Override
     public int sort() {
         // 重复调用检查之后、工具执行之前
-        return -80;
+        return 20;
     }
 
     @Override

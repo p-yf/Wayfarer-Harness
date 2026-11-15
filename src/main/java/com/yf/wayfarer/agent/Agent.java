@@ -119,13 +119,12 @@ public class Agent extends Loop {
     }
 
     /**
-     * 标准工具链：批量调度 → 单次调用链（重复检查 → 审批 → 执行）
+     * 标准工具链：步骤持久化 → 批量调度 → 单次调用（重复检查 → 审批 → 执行）
      */
     private static LoopChain defaultToolChain(ToolCall toolCall, HitlService hitl) {
-        LoopChain single = LoopChain.of(new ToolCircleCheckHandler(),
-                new CodingToolApprovalHandler(hitl), new ToolCallHandler(toolCall));
         return LoopChain.of(new AssistantAndToolCallPersistHandler(),
-                new ToolCallLoopHandler(single));
+                new ToolCallLoopHandler(), new ToolCircleCheckHandler(),
+                new CodingToolApprovalHandler(hitl), new ToolCallHandler(toolCall));
     }
 
     /**

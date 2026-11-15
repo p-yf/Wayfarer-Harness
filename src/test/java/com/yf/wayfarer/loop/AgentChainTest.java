@@ -94,8 +94,8 @@ class AgentChainTest {
         toolCall.parse(new LogTools());
 
         LoopChain modelChain = LoopChain.of(new ModelHandler(model, List.of()), new MemoryManageHandler());
-        LoopChain toolChain = LoopChain.of(new ToolCallLoopHandler(
-                LoopChain.of(new ToolCallHandler(toolCall))));
+        LoopChain toolChain = LoopChain.of(new ToolCallLoopHandler(),
+                new ToolCallHandler(toolCall));
 
         AgentContext context = new AgentContext();
         context.put(AgentContext.TRACE_ID, "trace-1");

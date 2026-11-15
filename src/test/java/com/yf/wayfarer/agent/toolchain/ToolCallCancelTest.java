@@ -40,8 +40,7 @@ class ToolCallCancelTest {
                 FinishReason.TOOL_CALLS,
                 List.of(new ToolCallInfo("call_1", "read", "{\"path\":\"a.txt\"}")), null));
 
-        new ToolCallLoopHandler(LoopChain.of(new ToolCallHandler(toolCall))).run(context, () -> {
-        });
+        LoopChain.of(new ToolCallLoopHandler(), new ToolCallHandler(toolCall)).run(context);
 
         assertEquals(0, tools.calls, "已终止时不应再执行工具");
         List<ChatMessage> messages = context.messages();

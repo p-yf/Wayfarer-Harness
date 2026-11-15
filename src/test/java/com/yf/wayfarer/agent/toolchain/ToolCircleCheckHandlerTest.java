@@ -77,9 +77,8 @@ class ToolCircleCheckHandlerTest {
         List<AgentMessage> pushed = new ArrayList<>();
         context.put(AgentContext.AGENT_MSG_SINK, (Consumer<AgentMessage>) pushed::add);
 
-        new ToolCallLoopHandler(LoopChain.of(new ToolCircleCheckHandler(),
-                new ToolCallHandler(toolCall))).run(context, () -> {
-        });
+        LoopChain.of(new ToolCallLoopHandler(), new ToolCircleCheckHandler(),
+                new ToolCallHandler(toolCall)).run(context);
 
         assertEquals(4, tools.calls, "第五次调用不应真正执行");
         List<ChatMessage> messages = context.messages();

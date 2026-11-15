@@ -36,8 +36,8 @@ public class ToolCircleCheckHandler implements ChainHandler {
 
     @Override
     public int sort() {
-        // 单次调用链最外层：先判定是否允许执行
-        return -100;
+        // 单次处理的最外层：先判定是否允许执行
+        return 10;
     }
 
     @Override

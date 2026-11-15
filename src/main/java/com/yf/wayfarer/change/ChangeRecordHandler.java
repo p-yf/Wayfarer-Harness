@@ -21,6 +21,12 @@ public final class ChangeRecordHandler implements ChainHandler {
     }
 
     @Override
+    public int sort() {
+        // 审批之后、执行之前，环绕真正的工具调用
+        return 30;
+    }
+
+    @Override
     public void run(AgentContext context, Runnable next) {
         ToolCallInfo info = context.currentToolCall();
         ChangeRecorder.Snapshot snapshot = changeRecorder.before(context, info);

@@ -1,19 +1,21 @@
 package com.yf.wayfarer.agent.agentchain;
 
-import com.yf.wayfarer.agent.AgentHandler;
 import com.yf.wayfarer.change.ChangeRecorder;
 import com.yf.wayfarer.loop.AgentContext;
+import com.yf.wayfarer.loop.ChainHandler;
 import com.yf.wayfarer.message.AgentMessage;
-import reactor.core.publisher.Flux;
+
+import java.util.function.Consumer;
 
 /**
- * 运行结束后的文件变更汇总处理器。
+ * 运行级的文件变更记录与汇总处理器。
  *
  * @author yyf
- * @description 作为 agent 运行级链的一环，在主循环把本轮消息全部推完后，
- * 把本轮变更整体作为一条消息追加到流末尾；变更逻辑因此留在链上，agent 无需依赖变更记录器
+ * @description 运行开始时记下脏文件基线，主循环结束后把整轮改动提交成一条记录，并把汇总消息推进汇聚口。
+ * 收尾写在 finally 里，因此正常结束、异常、被取消都会执行；取消后汇聚口已断开，
+ * 汇总消息会静默丢弃，页面刷新时用查询接口还原气泡
  */
-public final class ChangeSummaryHandler implements AgentHandler {
+public final class ChangeSummaryHandler implements ChainHandler {
 
     private final ChangeRecorder changeRecorder;
 
@@ -22,7 +24,7 @@ public final class ChangeSummaryHandler implements AgentHandler {
     }
 
     /**
-     * 位于最外层：后置逻辑在所有环节之后执行，保证汇总消息始终是流的最后一条。
+     * 位于最外层：前置逻辑在整轮运行之前执行，后置逻辑在主循环之后执行。
      */
     @Override
     public int sort() {
@@ -30,10 +32,17 @@ public final class ChangeSummaryHandler implements AgentHandler {
     }
 
     @Override
-    public Flux<AgentMessage> apply(AgentContext context, Flux<AgentMessage> next) {
-        return next.concatWith(Flux.defer(() -> {
+    public void run(AgentContext context, Runnable next) {
+        ChangeRecorder.Run run = changeRecorder.begin(context);
+        try {
+            next.run();
+        } finally {
+            changeRecorder.finish(context, run);
             AgentMessage summary = changeRecorder.summary(context);
-            return summary == null ? Flux.empty() : Flux.just(summary);
-        }));
+            Consumer<AgentMessage> sink = context.agentMsgSink();
+            if (summary != null && sink != null) {
+                sink.accept(summary);
+            }
+        }
     }
 }

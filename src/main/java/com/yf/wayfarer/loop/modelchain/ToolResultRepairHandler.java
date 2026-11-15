@@ -17,7 +17,8 @@ import java.util.Set;
  *
  * @author yyf
  * @description 调用模型前检查历史：若某条 assistant 的 tool_calls 缺少对应工具结果
- * （例如运行被终止），就地插入占位结果，避免供应商报错。占位只用于本次请求，不写入会话
+ * （例如历史被截断、旧版本遗留），就地插入占位结果，避免供应商报错。
+ * 占位会进入消息历史，随后可能被持久化处理器写入会话，作为缺失结果的兜底记录
  */
 public class ToolResultRepairHandler implements ChainHandler {
 

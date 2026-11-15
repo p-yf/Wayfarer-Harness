@@ -51,12 +51,21 @@ public class Loop {
         Sinks.Many<AgentMessage> output = Sinks.many().unicast().onBackpressureBuffer();
         context.put(AgentContext.AGENT_MSG_SINK, (Consumer<AgentMessage>) output::tryEmitNext);
         AtomicBoolean cancelled = new AtomicBoolean(false);
+        Runnable core = () -> loop(context, output, cancelled);
 
         return output.asFlux()
-                .doOnSubscribe(subscription -> Mono.fromRunnable(() -> loop(context, output, cancelled))
-                        .subscribeOn(Schedulers.boundedElastic())
-                        .subscribe(ignored -> {
-                        }, output::tryEmitError))
+                .doOnSubscribe(subscription -> Mono.fromRunnable(() -> {
+                    // 运行体同步执行，终止信号在它返回后发出：这样运行级链的后置逻辑
+                    // 既能在结束前把汇总消息推进汇聚口，也不会因为下游取消而丢失收尾工作
+                    try {
+                        execute(context, core);
+                        output.tryEmitComplete();
+                    } catch (RuntimeException e) {
+                        log.error("运行异常 traceId={}", context.traceId(), e);
+                        output.tryEmitError(e);
+                    }
+                }).subscribeOn(Schedulers.boundedElastic()).subscribe(ignored -> {
+                }, output::tryEmitError))
                 .doOnCancel(() -> {
                     cancelled.set(true);
                     // 供模型与工具判断：模型流随即释放，工具等当前这一条收尾
@@ -65,46 +74,48 @@ public class Loop {
                 });
     }
 
+    /**
+     * 执行一次运行。默认直接跑主循环；子类可把主循环包进运行级链，
+     * 因为这里是同步调用，前后逻辑在取消或异常时都能靠 try/finally 收尾。
+     */
+    protected void execute(AgentContext context, Runnable core) {
+        core.run();
+    }
+
     private void loop(AgentContext context, Sinks.Many<AgentMessage> output, AtomicBoolean cancelled) {
-        try {
-            int turn = 0;
-            while (!cancelled.get() && (maxTurns == null || turn < maxTurns)) {
-                turn++;
-                // 每一轮都把轮次序号写入上下文，供链路与工具读取
-                context.put(AgentContext.TURN_INDEX, turn);
-                log.info("轮次开始 turn={} traceId={} 消息数={}", turn, context.traceId(),
-                        context.messages() == null ? 0 : context.messages().size());
-                // 模型链负责把流式片段推入汇聚口，并把完整响应写入上下文
-                runStep(context, modelChain);
-                if (cancelled.get()) {
-                    break;
-                }
-                ModelResponse response = context.modelResponse();
-                if (response == null || response.toolCalls().isEmpty()) {
-                    log.info("轮次结束 turn={} 无工具调用", turn);
-                    break;
-                }
-                log.info("轮次结束 turn={} 工具调用数={}", turn, response.toolCalls().size());
-                // 轮次已用尽：不再推送工具调用消息，也不执行工具链
-                if (maxTurns != null && turn >= maxTurns) {
-                    break;
-                }
-                for (ToolCallInfo info : response.toolCalls()) {
-                    if (cancelled.get()) {
-                        break;
-                    }
-                    output.tryEmitNext(new AgentMessage.ToolCall(context.traceId(), info));
-                }
-                if (cancelled.get()) {
-                    break;
-                }
-                // 工具链负责执行工具并把结果推入汇聚口
-                runStep(context, toolChain);
+        int turn = 0;
+        while (!cancelled.get() && (maxTurns == null || turn < maxTurns)) {
+            turn++;
+            // 每一轮都把轮次序号写入上下文，供链路与工具读取
+            context.put(AgentContext.TURN_INDEX, turn);
+            log.info("轮次开始 turn={} traceId={} 消息数={}", turn, context.traceId(),
+                    context.messages() == null ? 0 : context.messages().size());
+            // 模型链负责把流式片段推入汇聚口，并把完整响应写入上下文
+            runStep(context, modelChain);
+            if (cancelled.get()) {
+                break;
             }
-            output.tryEmitComplete();
-        } catch (RuntimeException e) {
-            log.error("运行异常 traceId={}", context.traceId(), e);
-            output.tryEmitError(e);
+            ModelResponse response = context.modelResponse();
+            if (response == null || response.toolCalls().isEmpty()) {
+                log.info("轮次结束 turn={} 无工具调用", turn);
+                break;
+            }
+            log.info("轮次结束 turn={} 工具调用数={}", turn, response.toolCalls().size());
+            // 轮次已用尽：不再推送工具调用消息，也不执行工具链
+            if (maxTurns != null && turn >= maxTurns) {
+                break;
+            }
+            for (ToolCallInfo info : response.toolCalls()) {
+                if (cancelled.get()) {
+                    break;
+                }
+                output.tryEmitNext(new AgentMessage.ToolCall(context.traceId(), info));
+            }
+            if (cancelled.get()) {
+                break;
+            }
+            // 工具链负责执行工具并把结果推入汇聚口
+            runStep(context, toolChain);
         }
     }
 

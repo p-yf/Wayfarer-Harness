@@ -66,7 +66,6 @@ class ChangeServiceResetTest {
         assertEquals("a1", read("a.txt"), "t2 的改动应被撤销");
         assertFalse(Files.exists(workspace.resolve("c.txt")), "t3 新增的文件应被删除");
         assertEquals("b1", read("b.txt"), "其它会话的改动不能被牵连");
-        assertTrue(((List<?>) result.get("conflicts")).isEmpty());
     }
 
     @Test
@@ -83,7 +82,7 @@ class ChangeServiceResetTest {
     }
 
     @Test
-    void 之后被手工改过的文件记为冲突并跳过() {
+    void 之后被手工改过的文件也按撤销内容覆盖() {
         write("a.txt", "a1");
         commit(Set.of("a.txt"), "s1", "t1");
         write("a.txt", "a2");
@@ -93,11 +92,8 @@ class ChangeServiceResetTest {
 
         Map<String, Object> result = service.revertSessionChanges("s1", Set.of("t1"), "t2");
 
-        assertEquals(0, result.get("reverted"));
-        List<?> conflicts = (List<?>) result.get("conflicts");
-        assertEquals(1, conflicts.size());
-        assertEquals("a.txt", ((Map<?, ?>) conflicts.get(0)).get("path"));
-        assertEquals("manual", read("a.txt"), "冲突路径不能被覆盖");
+        assertEquals(1, result.get("reverted"));
+        assertEquals("a1", read("a.txt"), "撤销优先：工作区后改的内容应被覆盖成边界之前的内容");
     }
 
     @Test

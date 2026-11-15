@@ -1,10 +1,7 @@
 package com.yf.wayfarer.change;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.message.AgentMessage;
-import com.yf.wayfarer.toolcall.ToolCallInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,30 +10,31 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
- * 工具调用的变更记录器。
+ * 一次 agent 运行的文件变更记录器。
  *
  * @author yyf
- * @description 在工具执行前后各取一次工作区的脏文件快照：差集就是这次调用真正改动的路径，
- * 成功时提交成一条影子仓库记录。读写分离、成功后提交、失败不提交，避免把别人的改动或半截结果记进来
+ * @description 运行开始时记下工作区脏文件集合，运行收尾时取差集提交成一条记录：
+ * 一轮运行 = 一条提交，既不用按工具名判断写不写文件，也不需要为每次调用做两次状态扫描。
+ * 收尾由运行级链的 finally 触发，因此正常结束、异常、被取消都不会漏记；
+ * 差集的意义在于排除运行前用户自己就改脏的文件
  */
 public final class ChangeRecorder {
 
     private static final Logger log = LoggerFactory.getLogger(ChangeRecorder.class);
 
     /**
-     * 可能改动文件的工具。read 之类的只读工具不做前后快照，省掉无意义的状态扫描。
+     * 一轮运行写成一条提交，提交说明里的工具名固定用该值，便于在 git log 里区分。
      */
-    private static final Set<String> WRITE_TOOLS = Set.of("bash", "edit", "write");
-
-    private static final ObjectMapper JSON = new ObjectMapper();
+    static final String RUN_TOOL = "run";
 
     private final ShadowRepositoryStore store;
 
     /**
-     * 查询服务，仅用于轮次结束时汇总本轮变更；单元测试可以只传 store。
+     * 查询服务，仅用于运行结束时汇总本轮变更；单元测试可以只传 store。
      */
     private final ChangeService changeService;
 
@@ -50,12 +48,12 @@ public final class ChangeRecorder {
     }
 
     /**
-     * 工具执行前调用：准备仓库并记录当前脏文件集合。
+     * 运行开始时调用：确保仓库存在并记下当前脏文件集合。
      *
-     * @return 后续传给 {@link #after} 的快照；不需要记录时返回 null
+     * @return 收尾时交给 {@link #finish} 的快照；不需要记录时返回 null
      */
-    public Snapshot before(AgentContext context, ToolCallInfo info) {
-        if (!store.enabled() || context == null || info == null || !WRITE_TOOLS.contains(info.name())) {
+    public Run begin(AgentContext context) {
+        if (!store.enabled() || context == null) {
             return null;
         }
         try {
@@ -65,38 +63,27 @@ public final class ChangeRecorder {
                 return null;
             }
             repository.ensure();
-            return new Snapshot(repository, info, repository.dirtyPaths());
+            return new Run(repository, repository.dirtyPaths());
         } catch (RuntimeException e) {
-            // 记录失败不能影响工具本身，工具照常执行
-            log.warn("变更记录准备失败 traceId={} 工具={}", context.traceId(), info.name(), e);
+            // 记录失败不能影响运行本身，工具照常执行
+            log.warn("变更记录准备失败 traceId={}", context.traceId(), e);
             return null;
         }
     }
 
     /**
-     * 工具执行后调用：计算本次真正改动的路径并提交。
+     * 运行收尾时调用：把「结束时变脏的文件 − 开始时已脏的文件」提交成一条记录。
      *
-     * @param content 工具返回给模型的文本，用于判断本次调用是否成功
+     * <p>正常结束、异常、取消都会调用；重复调用只提交一次，避免取消回调与完成回调叠加。</p>
      */
-    public void after(AgentContext context, Snapshot snapshot, String content) {
-        if (snapshot == null || context == null) {
-            return;
-        }
-        if (failed(content)) {
-            // 失败调用写了半个文件也不提交；残留改动会在下一次成功提交时被一起带走
-            log.info("工具失败，不记录变更 traceId={} 工具={}", context.traceId(), snapshot.info().name());
+    public void finish(AgentContext context, Run run) {
+        if (run == null || context == null || !run.once.compareAndSet(false, true)) {
             return;
         }
         try {
-            Set<String> dirtyAfter = snapshot.repository().dirtyPaths();
+            Set<String> dirtyAfter = run.repository.dirtyPaths();
             Set<String> changed = new LinkedHashSet<>(dirtyAfter);
-            changed.removeAll(snapshot.dirtyBefore());
-
-            // write/edit 的参数路径是已知目标，若它确实变脏则强制纳入，避免路径写法差异导致漏记
-            String argumentPath = snapshot.repository().relativePath(pathArgument(snapshot.info()));
-            if (argumentPath != null && dirtyAfter.contains(argumentPath)) {
-                changed.add(argumentPath);
-            }
+            changed.removeAll(run.dirtyBefore);
             if (changed.isEmpty()) {
                 return;
             }
@@ -104,26 +91,25 @@ public final class ChangeRecorder {
             Map<String, String> trailers = new LinkedHashMap<>();
             trailers.put(ShadowRepository.TRAILER_SESSION, nullSafe(context.sessionId()));
             trailers.put(ShadowRepository.TRAILER_TRACE, nullSafe(context.traceId()));
-            trailers.put(ShadowRepository.TRAILER_TOOL, snapshot.info().name());
-            trailers.put(ShadowRepository.TRAILER_CALL, nullSafe(snapshot.info().id()));
+            trailers.put(ShadowRepository.TRAILER_TOOL, RUN_TOOL);
             trailers.put(ShadowRepository.TRAILER_STATUS, "success");
 
-            String commitId = snapshot.repository().commit(changed, summary(snapshot.info(), changed), trailers);
+            String commitId = run.repository.commit(changed, "run " + changed.size() + " 个文件", trailers);
             if (commitId != null) {
-                log.info("记录文件变更 traceId={} 工具={} 文件数={} commit={}",
-                        context.traceId(), snapshot.info().name(), changed.size(), commitId);
+                log.info("记录本轮文件变更 traceId={} 文件数={} commit={}",
+                        context.traceId(), changed.size(), commitId);
             }
         } catch (RuntimeException e) {
-            log.warn("变更记录失败 traceId={} 工具={}", context.traceId(), snapshot.info().name(), e);
+            log.warn("变更记录失败 traceId={}", context.traceId(), e);
             notifyFailure(context, e);
         }
     }
 
     /**
-     * 轮次结束时的整体变更消息。
+     * 运行结束时的整体变更消息。
      *
-     * <p>运行结束后由 Agent 追加到 SSE 流末尾，页面据此直接渲染「文件变更气泡」，
-     * 不需要再发一次查询请求。没有变更时返回 null，不推送空事件。</p>
+     * <p>由运行级链追加到 SSE 流末尾，页面据此直接渲染「文件变更气泡」，不需要再发一次查询请求。
+     * 没有变更时返回 null，不推送空事件。取消的运行不会走到这里，页面刷新时由查询接口还原气泡。</p>
      */
     public AgentMessage summary(AgentContext context) {
         if (!store.enabled() || changeService == null || context == null) {
@@ -150,39 +136,6 @@ public final class ChangeRecorder {
         }
     }
 
-    /**
-     * 工具失败判定：现有工具把错误写在返回文本里而不是抛异常，这里按约定前缀识别。
-     */
-    static boolean failed(String content) {
-        if (content == null || content.isEmpty()) {
-            return false;
-        }
-        return content.startsWith("错误：")
-                || content.contains("命令退出码 ")
-                || content.contains("命令超时，已在")
-                || content.contains("命令已被终止");
-    }
-
-    /**
-     * 从工具参数里取 path 字段（write/edit 使用），bash 没有该字段。
-     */
-    private static String pathArgument(ToolCallInfo info) {
-        try {
-            JsonNode node = JSON.readTree(info.arguments());
-            JsonNode path = node == null ? null : node.get("path");
-            return path == null || path.isNull() ? null : path.asText();
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private static String summary(ToolCallInfo info, Set<String> changed) {
-        if (changed.size() == 1) {
-            return info.name() + " " + changed.iterator().next();
-        }
-        return info.name() + " " + changed.size() + " 个文件";
-    }
-
     private static String nullSafe(String value) {
         return value == null ? "" : value;
     }
@@ -203,8 +156,16 @@ public final class ChangeRecorder {
 
     /**
      * @author yyf
-     * @description 一次工具调用的记录上下文：仓库、工具信息与执行前的脏文件集合
+     * @description 一次运行的记录基线：仓库与运行开始时的脏文件集合；once 保证收尾只提交一次
      */
-    public record Snapshot(ShadowRepository repository, ToolCallInfo info, Set<String> dirtyBefore) {
+    public static final class Run {
+        private final ShadowRepository repository;
+        private final Set<String> dirtyBefore;
+        private final AtomicBoolean once = new AtomicBoolean(false);
+
+        private Run(ShadowRepository repository, Set<String> dirtyBefore) {
+            this.repository = repository;
+            this.dirtyBefore = Set.copyOf(dirtyBefore);
+        }
     }
 }

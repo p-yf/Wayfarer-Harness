@@ -1,7 +1,6 @@
 package com.yf.wayfarer.web;
 
 import com.yf.wayfarer.agent.Agent;
-import com.yf.wayfarer.agent.AgentChain;
 import com.yf.wayfarer.loop.AssistantAndToolCallPersistHandler;
 import com.yf.wayfarer.loop.modelchain.MemoryCompactConfig;
 import com.yf.wayfarer.loop.modelchain.MemoryCompressHandler;
@@ -16,7 +15,6 @@ import com.yf.wayfarer.loop.toolchain.CodingToolApprovalHandler;
 import com.yf.wayfarer.loop.toolchain.ToolCallHandler;
 import com.yf.wayfarer.loop.toolchain.ToolCallLoopHandler;
 import com.yf.wayfarer.loop.toolchain.ToolCircleCheckHandler;
-import com.yf.wayfarer.change.ChangeRecordHandler;
 import com.yf.wayfarer.change.ChangeRecorder;
 import com.yf.wayfarer.agent.agentchain.ChangeSummaryHandler;
 import com.yf.wayfarer.loop.LoopChain;
@@ -156,6 +154,9 @@ public class AgentService {
 
     /**
      * 终止指定会话正在运行的任务，返回是否确有任务被终止。
+     *
+     * <p>取消是协作式的：接口只发出终止请求，主循环收尾（提交本轮变更、落盘状态）
+     * 由运行线程自行完成；页面侧通过轮询变更接口来获取收尾结果。</p>
      */
     public boolean cancel(String sessionId) {
         Subscription subscription = running.remove(sessionId);
@@ -190,14 +191,13 @@ public class AgentService {
                 new AssistantAndToolCallPersistHandler(),
                 new ModelHandler(model, tools),
                 new MemoryManageHandler());
-        // 工具链：步骤持久化 → 批量调度 → 单次调用（重复检查 → 审批 → 变更记录 → 执行）
+        // 工具链：步骤持久化 → 批量调度 → 单次调用（重复检查 → 审批 → 执行）
         LoopChain toolChain = LoopChain.of(new AssistantAndToolCallPersistHandler(),
                 new ToolCallLoopHandler(), new ToolCircleCheckHandler(),
-                new CodingToolApprovalHandler(hitlService), new ChangeRecordHandler(changeRecorder),
-                new ToolCallHandler(toolCall));
-        // 运行级链：主循环结束后把本轮文件变更整体追加到流末尾
-        AgentChain agentChain = AgentChain.of(new ChangeSummaryHandler(changeRecorder));
-        return new Agent(session, modelChain, toolChain, agentChain, maxTurns);
+                new CodingToolApprovalHandler(hitlService), new ToolCallHandler(toolCall));
+        // 运行级链：运行开始记录脏文件基线，收尾提交本轮变更并推送汇总消息
+        LoopChain runChain = LoopChain.of(new ChangeSummaryHandler(changeRecorder));
+        return new Agent(session, modelChain, toolChain, runChain, maxTurns);
     }
 
     private ModelConfig modelConfig() {

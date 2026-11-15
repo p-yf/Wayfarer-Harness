@@ -2,7 +2,6 @@ package com.yf.wayfarer.loop.toolchain;
 
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.loop.ChainHandler;
-import com.yf.wayfarer.loop.modelchain.ToolResultRepairHandler;
 import com.yf.wayfarer.model.ModelResponse;
 import com.yf.wayfarer.toolcall.ToolCallInfo;
 
@@ -14,6 +13,11 @@ import com.yf.wayfarer.toolcall.ToolCallInfo;
  * 使链上后续的单次处理器逐个执行；本处理器不感知检查、审批、变更记录与执行细节
  */
 public class ToolCallLoopHandler implements ChainHandler {
+
+    /**
+     * 运行已被终止、调用未执行时补的结果，比「未得到结果」更能说明发生了什么。
+     */
+    public static final String CANCELLED_RESULT = "<sys-运行已被用户终止，本次工具调用未执行>";
 
     /**
      * 位于单次处理器之前、持久化处理器之后。
@@ -33,8 +37,7 @@ public class ToolCallLoopHandler implements ChainHandler {
             for (ToolCallInfo info : response.toolCalls()) {
                 if (context.isCancelled()) {
                     // 已终止：不再执行剩余工具，但要补一条结果，避免助手消息缺少配对
-                    ToolCallHandler.appendResult(context, info,
-                            ToolResultRepairHandler.PLACEHOLDER);
+                    ToolCallHandler.appendResult(context, info, CANCELLED_RESULT);
                     continue;
                 }
                 context.put(AgentContext.CURRENT_TOOL_CALL, info);

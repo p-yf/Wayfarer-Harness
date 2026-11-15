@@ -13,9 +13,20 @@ import java.util.Set;
 /**
  * 变更记录的查询与回退编排。
  *
+ * <p>数据源是各工作区的影子仓库，本身不存任何状态。整体链路：</p>
+ * <pre>
+ * 记录：ToolCallHandler → ChangeRecorder → ShadowRepository.commit
+ * 查询：页面 → ChangeController → list / diff → 遍历仓库、解析 trailer、过滤会话与轮次
+ * 撤销：页面 → ChangeController → revert → ShadowRepository.revert（恢复父提交内容 + 回退提交）
+ * reset：SessionController → revertSessionChanges（按保留的 trace 集合算边界，再批量回退）
+ * </pre>
+ *
+ * <p>「按会话」「按轮次」都只是在内存里过滤提交的 trailer，因此查询成本与仓库提交数成正比；
+ * 这也意味着会话 fork/clone 之后，两个会话共享同一条文件时间线，各自只能看到
+ * {@code Wayfarer-Session} 等于自己的那些提交。</p>
+ *
  * @author yyf
- * @description 以工作区的影子仓库为数据源，按会话/轮次过滤提交，提供 diff 与撤销；
- * 会话 reset 时按「保留的 trace 集合」找出需要回退的提交，见 docs/shadow-git-spec.md 6.5
+ * @description 以影子仓库为数据源，提供变更列表、单提交 diff、撤销与 reset 回退
  */
 public final class ChangeService {
 
@@ -35,7 +46,7 @@ public final class ChangeService {
         List<Located> matched = new ArrayList<>();
         for (ShadowRepository repository : store.all()) {
             for (ChangeCommit commit : repository.commits()) {
-                // 基线提交是工作区的原始快照，不对应任何工具调用
+                // 基线提交是工作区的原始快照，不对应任何一次运行
                 if (ShadowRepository.BASELINE_TOOL.equals(commit.tool())) {
                     continue;
                 }
@@ -56,7 +67,12 @@ public final class ChangeService {
             if (result.size() >= max) {
                 break;
             }
-            result.add(view(located));
+            List<Map<String, Object>> files = filesOf(located.repository(), located.commit().commitId());
+            // 没有文件差异的提交（例如重复撤销同一路径后内容已与父提交相同）不占列表位置
+            if (files.isEmpty()) {
+                continue;
+            }
+            result.add(view(located, files));
         }
         return result;
     }
@@ -69,42 +85,65 @@ public final class ChangeService {
     }
 
     /**
-     * 某个提交的 diff；path 为空时返回全部文件。
+     * 判断某个提交里某个文件是否为二进制；二进制文件无法生成文本补丁。
      */
-    public Map<String, Object> diff(String commitId, String path) {
-        ShadowRepository repository = repositoryOf(commitId);
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("commitId", commitId);
-        result.put("path", path);
-        result.put("patch", repository.diff(commitId, path));
-        return result;
+    private static boolean isBinary(ShadowRepository repository, String commitId, String path) {
+        for (ChangeFile file : repository.files(commitId)) {
+            if (file.path().equals(path)) {
+                return file.binary();
+            }
+        }
+        return false;
     }
 
     /**
-     * 撤销一个提交（可只撤销其中一个路径）。
+     * 某个文件在一轮（或整个会话）里的净变化。
      *
-     * @param path 为空表示撤销整次调用
+     * <p>同一轮里同一个文件可能被多次工具调用改过，页面按文件展示时需要一段完整补丁：
+     * 取该文件最早那次改动的父提交作为基准、最晚那次改动作为目标，两者对比即净变化。
+     * 这样就不必把每次调用的碎片补丁拼在一起，也不会因为中间提交互相覆盖而显示错乱。</p>
+     *
+     * @param traceId 为空时按整个会话统计
      */
-    public Map<String, Object> revert(String commitId, String path) {
-        ShadowRepository repository = repositoryOf(commitId);
-        ChangeCommit commit = commitOf(repository, commitId);
-        if (ShadowRepository.BASELINE_TOOL.equals(commit.tool())) {
-            throw new IllegalArgumentException("基线提交不可撤销");
+    public Map<String, Object> fileDiff(String sessionId, String traceId, String path) {
+        if (blank(path)) {
+            throw new IllegalArgumentException("缺少参数：path");
         }
-        if (!blank(path) && !repository.changedPaths(commitId).contains(path)) {
-            throw new IllegalArgumentException("该提交不包含路径：" + path);
+        List<Located> matched = new ArrayList<>();
+        for (ShadowRepository repository : store.all()) {
+            for (ChangeCommit commit : repository.commits()) {
+                if (ShadowRepository.BASELINE_TOOL.equals(commit.tool())) {
+                    continue;
+                }
+                if (!blank(sessionId) && !sessionId.equals(commit.sessionId())) {
+                    continue;
+                }
+                if (!blank(traceId) && !traceId.equals(commit.traceId())) {
+                    continue;
+                }
+                if (!repository.changedPaths(commit.commitId()).contains(path)) {
+                    continue;
+                }
+                matched.add(new Located(repository, commit));
+            }
         }
 
-        Map<String, String> trailers = new LinkedHashMap<>();
-        trailers.put(ShadowRepository.TRAILER_SESSION, nullSafe(commit.sessionId()));
-        trailers.put(ShadowRepository.TRAILER_TRACE, nullSafe(commit.traceId()));
-        trailers.put(ShadowRepository.TRAILER_TOOL, "revert");
-        trailers.put(ShadowRepository.TRAILER_REASON, "manual-revert");
-        trailers.put(ShadowRepository.TRAILER_REVERTS, commitId);
-
-        String summary = blank(path) ? "revert " + commit.summary() : "revert " + path;
-        RevertOutcome outcome = repository.revert(List.of(commitId), blank(path) ? null : path, summary, trailers);
-        return outcomeView(outcome);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("path", path);
+        if (matched.isEmpty()) {
+            result.put("binary", false);
+            result.put("patch", "");
+            return result;
+        }
+        // commits() 是新的在前，所以第一项是最晚一次改动、最后一项是最早一次改动；
+        // 不按时间戳排序：同一秒内的多次提交时间戳相同，排序结果不稳定
+        Located latest = matched.get(0);
+        Located earliest = matched.get(matched.size() - 1);
+        boolean binary = isBinary(latest.repository(), latest.commit().commitId(), path);
+        result.put("binary", binary);
+        result.put("patch", binary ? "" : earliest.repository()
+                .diffRange(earliest.commit().parentId(), latest.commit().commitId(), path));
+        return result;
     }
 
     /**
@@ -118,7 +157,6 @@ public final class ChangeService {
         int reverted = 0;
         List<String> revertCommits = new ArrayList<>();
         List<String> files = new ArrayList<>();
-        List<Map<String, Object>> conflicts = new ArrayList<>();
 
         for (ShadowRepository repository : store.all()) {
             // commits() 是新的在前，转成从旧到新，边界才好按「提交链顺序」算
@@ -166,14 +204,12 @@ public final class ChangeService {
                 revertCommits.add(outcome.commitId());
             }
             files.addAll(outcome.files());
-            conflicts.addAll(outcome.conflicts());
         }
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("reverted", reverted);
         result.put("revertCommits", revertCommits);
         result.put("files", files);
-        result.put("conflicts", conflicts);
         return result;
     }
 
@@ -201,7 +237,7 @@ public final class ChangeService {
         return traces;
     }
 
-    private Map<String, Object> view(Located located) {
+    private Map<String, Object> view(Located located, List<Map<String, Object>> files) {
         ChangeCommit commit = located.commit();
         Map<String, Object> entry = new LinkedHashMap<>();
         entry.put("commitId", commit.commitId());
@@ -212,9 +248,13 @@ public final class ChangeService {
         entry.put("toolCallId", commit.toolCallId());
         entry.put("summary", commit.summary());
         entry.put("createdAt", commit.createdAt().toString());
+        entry.put("files", files);
+        return entry;
+    }
 
+    private static List<Map<String, Object>> filesOf(ShadowRepository repository, String commitId) {
         List<Map<String, Object>> files = new ArrayList<>();
-        for (ChangeFile file : located.repository().files(commit.commitId())) {
+        for (ChangeFile file : repository.files(commitId)) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("path", file.path());
             item.put("changeType", file.changeType());
@@ -223,36 +263,7 @@ public final class ChangeService {
             item.put("binary", file.binary());
             files.add(item);
         }
-        entry.put("files", files);
-        return entry;
-    }
-
-    private Map<String, Object> outcomeView(RevertOutcome outcome) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("commitId", outcome.commitId());
-        result.put("files", outcome.files());
-        result.put("conflicts", outcome.conflicts());
-        return result;
-    }
-
-    private ShadowRepository repositoryOf(String commitId) {
-        if (blank(commitId)) {
-            throw new IllegalArgumentException("缺少参数：commitId");
-        }
-        ShadowRepository repository = store.forCommit(commitId);
-        if (repository == null) {
-            throw new IllegalArgumentException("变更记录不存在：" + commitId);
-        }
-        return repository;
-    }
-
-    private static ChangeCommit commitOf(ShadowRepository repository, String commitId) {
-        for (ChangeCommit commit : repository.commits()) {
-            if (commit.commitId().equals(commitId)) {
-                return commit;
-            }
-        }
-        throw new IllegalArgumentException("变更记录不存在：" + commitId);
+        return files;
     }
 
     private static boolean blank(String value) {

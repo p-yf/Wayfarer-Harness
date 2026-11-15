@@ -125,7 +125,7 @@ input, textarea, select { font: inherit; color: var(--text); }
   width: var(--sidebar-width);
   flex: 0 0 auto;
   background: var(--sidebar-bg);
-  border-right: 1px solid var(--border-soft);
+  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -133,7 +133,7 @@ input, textarea, select { font: inherit; color: var(--text); }
 }
 .sidebar.collapsed { width: 0; border-right: 0; }
 
-/* 拖拽手柄：7px 命中区，中间一条细线，悬停时高亮 */
+/* 拖拽手柄：7px 命中区；静态不画线，分隔线由两侧的 border 承担，悬停时才高亮 */
 .resizer {
   flex: 0 0 auto;
   width: 7px;
@@ -146,7 +146,7 @@ input, textarea, select { font: inherit; color: var(--text); }
   position: absolute;
   top: 0; bottom: 0; left: 3px;
   width: 1px;
-  background: var(--border-soft);
+  background: transparent;
 }
 .resizer:hover::after { background: var(--accent); }
 body.is-resizing { cursor: col-resize; user-select: none; }
@@ -378,6 +378,8 @@ body.is-resizing .sidebar, body.is-resizing .panel { transition: none; }
 }
 .icon-btn:hover { background: var(--bg-hover); }
 
+/* 聊天区外壳：作为审批浮层的定位基准，让卡片相对聊天窗口居中而不是相对整页 */
+.chat-wrap { flex: 1; position: relative; display: flex; min-height: 0; }
 .chat { flex: 1; overflow-y: auto; position: relative; }
 .chat-inner { max-width: 800px; margin: 0 auto; padding: 28px 24px 20px; }
 
@@ -689,19 +691,19 @@ body.is-resizing .sidebar, body.is-resizing .panel { transition: none; }
   white-space: nowrap;
 }
 
-/* 审批卡片：在聊天窗口底部居中弹出，按 pending.metadata 渲染单选按钮组 */
+/* 审批卡片：覆在聊天区之上、相对聊天窗口居中，按 pending.metadata 渲染单选按钮组 */
 .hitl-area { display: none; }
 .hitl-area.show {
-  position: fixed;
-  left: 264px;
-  right: 0;
-  bottom: 0;
+  position: absolute;
+  inset: 0;
   z-index: 30;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 10px;
-  padding: 0 16px 16px;
+  padding: 24px 16px;
+  overflow-y: auto;
   pointer-events: none;
 }
 .hitl-card {
@@ -869,7 +871,8 @@ body.is-resizing .sidebar, body.is-resizing .panel { transition: none; }
   width: var(--panel-width);
   flex: 0 0 auto;
   background: var(--bg);
-  border-left: 1px solid var(--border-soft);
+  /* 与左侧栏同色：中间与右侧背景相同，太淡的分隔线会看不出来 */
+  border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -984,35 +987,14 @@ body.is-resizing .sidebar, body.is-resizing .panel { transition: none; }
   font-family: var(--mono);
   margin-bottom: 12px;
 }
-.change-group {
-  border: 1px solid var(--border-soft);
-  border-radius: 10px;
-  margin-bottom: 10px;
-  overflow: hidden;
-}
-.change-group-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: var(--bg-soft);
-}
-.change-tool { font-family: var(--mono); font-size: 11px; color: var(--text-secondary); }
-.change-group-title {
-  flex: 1;
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.change-group-stat { font-family: var(--mono); font-size: 11px; color: var(--text-caption); }
 .change-file { border-top: 1px solid var(--border-soft); }
+.change-file:first-of-type { border-top: 0; }
 .change-file-row {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 8px 12px;
+  padding: 9px 12px;
   text-align: left;
   font-size: 12px;
 }
@@ -1253,7 +1235,6 @@ body.is-resizing .sidebar, body.is-resizing .panel { transition: none; }
   .chat-inner { padding: 20px 14px 12px; }
   .composer-wrap { padding: 6px 12px 10px; }
   .msg-user .bubble { max-width: 92%; }
-  .hitl-area.show { left: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

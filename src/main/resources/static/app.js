@@ -1119,6 +1119,8 @@
       }
       view.abort = null;
       markRunning(view, false);
+      // 停止时 SSE 已断开，收尾提交是异步的，这里轮询几次把本轮变更气泡补上
+      if (aborted) await pollChangesAfterStop(view, sessionId);
       // 提醒钩子：正常结束与出错分别响一次，用户主动终止不打扰
       if (!aborted) remind(failed ? "error" : "done");
       // 后端会在第一条消息后自动命名会话，结束后刷新列表拿到新名称
@@ -1975,6 +1977,53 @@
     }
   }
 
+  /**
+   * 停止运行后轮询变更：取消时 SSE 已断开，服务端收尾提交是异步的，
+   * 拉到了本轮气泡就提前结束，拉不到就隔 300ms 再试，最多十次（约 3 秒）
+   */
+  async function pollChangesAfterStop(view, sessionId) {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      if (view !== currentView()) return;
+      if (await refreshChangesAfterStop(view, sessionId)) return;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  }
+
+  /**
+   * 拉一次变更并把新出现的气泡插进对话流。
+   *
+   * @return 是否有新增气泡
+   */
+  async function refreshChangesAfterStop(view, sessionId) {
+    if (!view || !sessionId || view !== currentView()) return false;
+    try {
+      const entries = await Api.listChanges(sessionId, null, 200);
+      const known = new Set(Object.keys(view.changeSummary || {}));
+      applyChangeEntries(view, entries);
+      let touched = false;
+      for (const [traceId, summary] of Object.entries(view.changeSummary)) {
+        if (known.has(traceId) || !summary.files.length) continue;
+        // 插到该轮最后一条消息之后，保持在「已停止」提示之前
+        let last = -1;
+        view.blocks.forEach((block, index) => {
+          if (block.traceId === traceId) last = index;
+        });
+        const block = { kind: "change", traceId, summary };
+        if (last >= 0) {
+          view.blocks.splice(last + 1, 0, block);
+        } else {
+          pushBlock(view, block);
+        }
+        touched = true;
+      }
+      if (touched) renderChat();
+      return touched;
+    } catch (_) {
+      // 单次失败不打断轮询，全部失败时下次打开会话还会重新拉取
+      return false;
+    }
+  }
+
   /** 轮次结束推送：更新本轮摘要，已有气泡就地替换，否则追加 */
   function applyChangesEvent(view, data) {
     const traceId = data.traceId;
@@ -2038,18 +2087,41 @@
     openPanel("changes", { traceId, entries: state.panel.entries });
   }
 
+  /** 把一轮里的变更按文件聚合：同一文件被多次改动只出现一行，增删行数取合计 */
+  function filesOfEntries(entries) {
+    const map = new Map();
+    for (const entry of entries || []) {
+      for (const file of entry.files || []) {
+        const current = map.get(file.path);
+        if (!current) {
+          map.set(file.path, {
+            path: file.path,
+            changeType: file.changeType,
+            insertions: file.insertions || 0,
+            deletions: file.deletions || 0,
+            binary: !!file.binary
+          });
+          continue;
+        }
+        current.insertions += file.insertions || 0;
+        current.deletions += file.deletions || 0;
+        current.binary = current.binary || !!file.binary;
+        // 先新增后修改时按「新增」展示，更符合直觉
+        if (current.changeType === "MODIFY" && file.changeType === "ADD") {
+          current.changeType = "ADD";
+        }
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.path.localeCompare(b.path));
+  }
+
   /** 点击气泡里的文件行：打开右侧面板，展开该文件并滚动到它的位置 */
   function openChangeFile(traceId, path) {
-    const view = currentView();
-    const entries = (view && view.changeEntries[traceId]) || [];
-    const entry = entries.find((item) => (item.files || []).some((file) => file.path === path));
     openChangePanel(traceId);
-    if (!entry) return;
-    const key = entry.commitId + ":" + path;
-    if (!state.panel.expanded.has(key)) {
-      toggleChangeDiff(entry.commitId, path);
+    if (!state.panel.expanded.has(path)) {
+      toggleChangeDiff(path);
     }
-    const holder = findChangeFile(key);
+    const holder = findChangeFile(path);
     if (holder) holder.scrollIntoView({ block: "start" });
   }
 
@@ -2057,100 +2129,93 @@
     return file.binary ? "二进制" : "+" + file.insertions + " −" + file.deletions;
   }
 
-  function findChangeFile(key) {
+  function findChangeFile(path) {
     return Array.from($("panelBody").querySelectorAll(".change-file"))
-      .find((item) => item.dataset.key === key);
+      .find((item) => item.dataset.key === path);
   }
 
   function renderChanges() {
     const body = $("panelBody");
     const entries = state.panel.entries || [];
-    if (!entries.length) {
+    const files = filesOfEntries(entries);
+    if (!files.length) {
       body.innerHTML = '<div class="panel-empty">本轮没有文件变更</div>';
       return;
     }
 
     const summary = summarizeChanges(entries);
-    let html = '<div class="change-summary">' + summary.commits + " 次调用 · " +
-      summary.files.length + " 个文件 · +" + summary.insertions + " −" + summary.deletions + "</div>";
+    let html = '<div class="change-summary">' + files.length + " 个文件 · +" +
+      summary.insertions + " −" + summary.deletions + "</div>";
 
-    for (const entry of entries) {
-      const stat = summarizeChanges([entry]);
-      html += '<div class="change-group"><div class="change-group-head">' +
-        '<span class="change-tool">' + esc(entry.tool || "tool") + "</span>" +
-        '<span class="change-group-title" title="' + esc(entry.summary || "") + '">' + esc(entry.summary || "") + "</span>" +
-        '<span class="change-group-stat">+' + stat.insertions + " −" + stat.deletions + "</span>" +
+    // 只按文件展示：同一文件被多次工具调用改过也只有一行，点开看这一轮的净变化
+    for (const file of files) {
+      html += '<div class="change-file" data-key="' + esc(file.path) + '">' +
+        '<button type="button" class="change-file-row" data-path="' + esc(file.path) + '">' +
+        '<span class="change-file-path" title="' + esc(file.path) + '">' + esc(file.path) + "</span>" +
+        '<span class="change-badge ' + esc(file.changeType || "") + '">' + esc(changeTypeLabel(file.changeType)) + "</span>" +
+        '<span class="change-file-stat">' + esc(fileStat(file)) + "</span>" +
+        '<span class="change-bubble-arrow">' + (state.panel.expanded.has(file.path) ? "▾" : "▸") + "</span>" +
+        "</button>" +
+        '<div class="change-diff hidden"></div>' +
         "</div>";
-      for (const file of entry.files || []) {
-        const key = entry.commitId + ":" + file.path;
-        html += '<div class="change-file" data-key="' + esc(key) + '">' +
-          '<button type="button" class="change-file-row" data-commit="' + esc(entry.commitId) +
-          '" data-path="' + esc(file.path) + '">' +
-          '<span class="change-file-path" title="' + esc(file.path) + '">' + esc(file.path) + "</span>" +
-          '<span class="change-badge ' + esc(file.changeType || "") + '">' + esc(changeTypeLabel(file.changeType)) + "</span>" +
-          '<span class="change-file-stat">' + esc(fileStat(file)) + "</span>" +
-          '<span class="change-bubble-arrow">' + (state.panel.expanded.has(key) ? "▾" : "▸") + "</span>" +
-          "</button>" +
-          '<div class="change-diff hidden"></div>' +
-          "</div>";
-      }
-      html += "</div>";
     }
     body.innerHTML = html;
 
     body.querySelectorAll(".change-file-row").forEach((row) => {
-      row.addEventListener("click", () => toggleChangeDiff(row.dataset.commit, row.dataset.path));
+      row.addEventListener("click", () => toggleChangeDiff(row.dataset.path));
     });
 
     // 主题切换等场景会重建面板：把已展开的文件恢复展开
-    for (const key of state.panel.expanded) {
-      const holder = findChangeFile(key);
+    for (const path of state.panel.expanded) {
+      const holder = findChangeFile(path);
       if (!holder) continue;
       const diff = holder.querySelector(".change-diff");
       const arrow = holder.querySelector(".change-bubble-arrow");
       diff.classList.remove("hidden");
       if (arrow) arrow.textContent = "▾";
-      if (state.panel.patches.has(key)) {
-        renderDiff(diff, state.panel.patches.get(key));
+      if (state.panel.patches.has(path)) {
+        renderDiff(diff, state.panel.patches.get(path));
       } else {
-        const separator = key.indexOf(":");
-        loadDiff(key, key.slice(0, separator), key.slice(separator + 1), diff);
+        loadDiff(path, diff);
       }
     }
   }
 
-  function toggleChangeDiff(commitId, path) {
-    const key = commitId + ":" + path;
-    const holder = findChangeFile(key);
+  function toggleChangeDiff(path) {
+    const holder = findChangeFile(path);
     if (!holder) return;
     const diff = holder.querySelector(".change-diff");
     const arrow = holder.querySelector(".change-bubble-arrow");
 
-    if (state.panel.expanded.has(key)) {
-      state.panel.expanded.delete(key);
+    if (state.panel.expanded.has(path)) {
+      state.panel.expanded.delete(path);
       diff.classList.add("hidden");
       diff.innerHTML = "";
       if (arrow) arrow.textContent = "▸";
       return;
     }
 
-    state.panel.expanded.add(key);
+    state.panel.expanded.add(path);
     diff.classList.remove("hidden");
     if (arrow) arrow.textContent = "▾";
-    if (state.panel.patches.has(key)) {
-      renderDiff(diff, state.panel.patches.get(key));
+    if (state.panel.patches.has(path)) {
+      renderDiff(diff, state.panel.patches.get(path));
     } else {
-      loadDiff(key, commitId, path, diff);
+      loadDiff(path, diff);
     }
   }
 
-  /** 按需拉取某个文件的 unified diff，结果缓存避免重复请求 */
-  async function loadDiff(key, commitId, path, container) {
+  /** 按需拉取某个文件在本轮里的净变化，结果缓存避免重复请求 */
+  async function loadDiff(path, container) {
     container.innerHTML = '<div class="change-note">加载中…</div>';
     try {
-      const result = await Api.changeDiff(commitId, path);
+      const result = await Api.changeFileDiff(state.currentId, state.panel.traceId, path);
+      if (result && result.binary) {
+        container.innerHTML = '<div class="change-note">二进制文件，不展示内容差异</div>';
+        return;
+      }
       const patch = (result && result.patch) || "";
-      state.panel.patches.set(key, patch);
+      state.panel.patches.set(path, patch);
       renderDiff(container, patch);
     } catch (e) {
       container.innerHTML = '<div class="change-note">' + esc(e.message) + "</div>";

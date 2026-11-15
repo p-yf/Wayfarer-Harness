@@ -16,8 +16,8 @@ import com.yf.wayfarer.loop.toolchain.ToolCallLoopHandler;
 import com.yf.wayfarer.loop.toolchain.ToolCircleCheckHandler;
 import com.yf.wayfarer.hitl.HitlService;
 import com.yf.wayfarer.loop.AgentContext;
-import com.yf.wayfarer.loop.LoopChain;
 import com.yf.wayfarer.loop.Loop;
+import com.yf.wayfarer.loop.LoopChain;
 import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ChatModel;
 import com.yf.wayfarer.session.JSONMsgType;
@@ -45,20 +45,21 @@ public class Agent extends Loop {
     private final Session session;
 
     /**
-     * 运行级链，包在主循环外层，用于在一次运行的首尾追加动作；为空时直接透传主循环消息流。
+     * 运行级链，末端是主循环本身。同步环绕执行，因此前置逻辑在运行前、后置逻辑在运行后，
+     * 取消或异常时后置逻辑同样会通过 try/finally 执行；为空时直接透传主循环。
      */
-    private final AgentChain agentChain;
+    private final LoopChain runChain;
 
     /**
      * @param modelChain 模型链，每轮一次模型调用
      * @param toolChain  工具链，模型返回工具调用后执行
-     * @param agentChain 运行级链，传入 null 表示不做运行前后的额外处理
+     * @param runChain   运行级链，传入 null 表示不做运行前后的额外处理
      * @param maxTurns   最大轮次，null 表示不限制
      */
-    public Agent(Session session, LoopChain modelChain, LoopChain toolChain, AgentChain agentChain, Integer maxTurns) {
+    public Agent(Session session, LoopChain modelChain, LoopChain toolChain, LoopChain runChain, Integer maxTurns) {
         super(modelChain, toolChain, maxTurns);
         this.session = session;
-        this.agentChain = agentChain == null ? AgentChain.of() : agentChain;
+        this.runChain = runChain == null ? LoopChain.of() : runChain;
     }
 
     /**
@@ -68,7 +69,7 @@ public class Agent extends Loop {
                  Integer maxTurns, Session session, UnloadedMessageStore unloadedStore,
                  MemoryCompactConfig compact, HitlService hitl, SkillStore skillStore) {
         this(session, defaultModelChain(model, tools, unloadedStore, compact, skillStore),
-                defaultToolChain(toolCall, hitl), AgentChain.of(), maxTurns);
+                defaultToolChain(toolCall, hitl), LoopChain.of(), maxTurns);
     }
 
     /**
@@ -87,17 +88,22 @@ public class Agent extends Loop {
                 ? UUID.randomUUID().toString()
                 : provided;
         context.put(AgentContext.TRACE_ID, traceId);
+        return run(context);
+    }
 
-        // 运行级链包在主循环外层，其后的处理器可在主循环结束后继续追加消息
-        return agentChain.apply(context, run(context))
-                // 正常结束先持久化状态再结束流，保证下游拿到完成信号时状态已经落盘
-                .concatWith(Flux.defer(() -> {
-                    persistStoreState(context, sessionId, traceId);
-                    return Flux.empty();
-                }))
-                // 取消与异常时 concatWith 不会执行，各补一次，保证任何终止方式都落盘
-                .doOnCancel(() -> persistStoreState(context, sessionId, traceId))
-                .doOnError(error -> persistStoreState(context, sessionId, traceId));
+    /**
+     * 把主循环包进运行级链：前置逻辑在运行前，后置逻辑在运行后。
+     * 无论正常结束、异常还是被取消，finally 都会把可持久化状态写入会话。
+     */
+    @Override
+    protected void execute(AgentContext context, Runnable core) {
+        String sessionId = context.sessionId();
+        String traceId = context.traceId();
+        try {
+            runChain.run(context, core);
+        } finally {
+            persistStoreState(context, sessionId, traceId);
+        }
     }
 
     /**

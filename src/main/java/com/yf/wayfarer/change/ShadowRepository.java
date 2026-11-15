@@ -31,7 +31,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -45,10 +44,35 @@ import java.util.function.Supplier;
 /**
  * 单个工作区对应的影子 git 仓库。
  *
+ * <p>理解下面五点就能看懂这个类：</p>
+ *
+ * <p><b>1. 仓库放在哪。</b>git 元数据（objects、refs、index）放在工作区之外的
+ * {@code <changes.root>/<key>/git-dir}，只有 work-tree 指向用户工作区。
+ * 这样用户目录里不会冒出多余的 .git，也不会覆盖用户自己在用的版本库。
+ * config 里写死 core.worktree 是必须的：git-dir 与 work-tree 分离后，
+ * 下次打开仓库时 git 无法自己推断工作区在哪。</p>
+ *
+ * <p><b>2. 基线提交。</b>仓库第一次创建时先对工作区做一次全量提交（trailer 里
+ * {@code Wayfarer-Tool=baseline}），代表「Agent 动手之前的样子」。之后所有 diff、
+ * 撤销都以它为起点，所以基线提交不允许撤销。</p>
+ *
+ * <p><b>3. 一轮运行 = 一条提交。</b>{@code ChangeRecorder} 在运行开始与运行收尾各取一次
+ * {@link #dirtyPaths()}，差集就是这次运行真正改动的文件；收尾时调用 {@link #commit}。
+ * 提交时只 stage 这几个路径，运行前用户自己就改脏的文件不会被误记成 Agent 的改动。</p>
+ *
+ * <p><b>4. 用提交说明做索引。</b>不引入数据库：提交说明第一行是摘要，空行之后是
+ * {@code Wayfarer-Session / Trace / Tool} 等 trailer。查询时遍历提交、解析
+ * trailer 就能按会话或轮次过滤，也能反查某次改动属于哪个会话、哪个轮次。</p>
+ *
+ * <p><b>5. 撤销不是改写历史。</b>仓库被同一工作区的多个会话共享，所以既不能
+ * {@code reset --hard} 也不能整树 checkout，否则会连带抹掉别的会话的记录和用户的手工修改。
+ * 撤销的做法是：把目标提交涉及的路径恢复成它<b>父提交</b>里的内容，再生成一条新的回退提交。</p>
+ *
+ * <p>所有对仓库的读写都经过 {@link #locked} 串行化，因为 JGit 的 index 是共享文件，
+ * 并发 add/commit 会把它写坏。</p>
+ *
  * @author yyf
- * @description git-dir 放在工作区之外，work-tree 指向工作区，因此不会在工作区里生成 .git。
- * 所有读写操作都按仓库加锁串行执行；每次工具调用产生的改动对应一条提交，
- * 提交说明里的 Wayfarer-* trailer 记录会话、轮次与工具调用信息。
+ * @description 影子仓库封装：创建与基线、脏文件快照、按路径提交、提交查询、diff、撤销
  */
 public final class ShadowRepository {
 
@@ -255,9 +279,15 @@ public final class ShadowRepository {
     }
 
     /**
-     * 该提交的 unified diff 文本；path 为空时返回本次提交全部文件的补丁。
+     * 两个提交之间的 unified diff 文本，只保留 path 一个文件。
+     *
+     * <p>用于「按文件看整轮改动」：页面拿到某轮最早那次改动的父提交、最晚那次改动，
+     * 就能得到这个文件在整轮里的净变化，而不是分散在每次工具调用里的碎片补丁。</p>
+     *
+     * @param baseCommitId 基准提交，null 表示空树（用于基线提交这种没有父提交的情况）
+     * @param targetCommitId 目标提交
      */
-    public String diff(String commitId, String path) {
+    public String diffRange(String baseCommitId, String targetCommitId, String path) {
         return locked(() -> {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             try (Git git = newGit();
@@ -268,8 +298,11 @@ public final class ShadowRepository {
                 if (path != null) {
                     formatter.setPathFilter(PathFilter.create(path));
                 }
-                RevCommit commit = walk.parseCommit(ObjectId.fromString(commitId));
-                List<DiffEntry> entries = scan(formatter, walk, commit);
+                RevCommit target = walk.parseCommit(ObjectId.fromString(targetCommitId));
+                var base = baseCommitId == null
+                        ? new EmptyTreeIterator()
+                        : treeIterator(walk, walk.parseCommit(ObjectId.fromString(baseCommitId)).getTree());
+                List<DiffEntry> entries = formatter.scan(base, treeIterator(walk, target.getTree()));
                 if (entries.isEmpty()) {
                     return "";
                 }
@@ -277,24 +310,7 @@ public final class ShadowRepository {
                 formatter.flush();
                 return out.toString(StandardCharsets.UTF_8);
             } catch (IOException e) {
-                throw new UncheckedIOException("生成 diff 失败", e);
-            }
-        });
-    }
-
-    /**
-     * 仓库里是否存在该提交，用于按提交 id 反查所属工作区。
-     */
-    public boolean contains(String commitId) {
-        if (commitId == null || commitId.isBlank()) {
-            return false;
-        }
-        return locked(() -> {
-            try (Git git = newGit(); RevWalk walk = new RevWalk(git.getRepository())) {
-                walk.parseCommit(ObjectId.fromString(commitId));
-                return true;
-            } catch (IOException | IllegalArgumentException e) {
-                return false;
+                throw new UncheckedIOException("生成区间 diff 失败", e);
             }
         });
     }
@@ -305,6 +321,14 @@ public final class ShadowRepository {
      * <p>做法是把这些提交涉及的路径恢复到各自父提交的内容，最后合并成一条回退提交。
      * 之所以不改写历史：仓库被多个会话共享，改写会连带抹掉别人的提交。</p>
      *
+     * <p>举例：某文件先后被 c1、c2 改过，现在要撤销这两次。逆序处理时先记下 c2 的
+     * 父内容作为「目标值」、c1 的父内容再覆盖它；于是同一路径多次改动会自然收敛到
+     * 最早那次改动之前的状态。</p>
+     *
+     * <p>写回时直接以目标内容覆盖工作区：即使这期间用户或其它会话也改过该文件，
+     * 也按「撤销优先」处理，不做冲突跳过。覆盖前的旧内容仍留在 shadow 仓库的历史里，
+     * 随时可以从 diff 面板看回来。</p>
+     *
      * @param commitIds       要撤销的提交，新的在前
      * @param pathFilter      只撤销单个路径，null 表示全部
      * @param summary         回退提交的摘要
@@ -313,8 +337,6 @@ public final class ShadowRepository {
     public RevertOutcome revert(List<String> commitIds, String pathFilter, String summary,
                                 Map<String, String> trailers) {
         return locked(() -> {
-            // expected：该路径「最后一次被撤销提交改动后」的内容，用来判断工作区是否被别人改过
-            Map<String, byte[]> expected = new LinkedHashMap<>();
             // desired：回退后该路径应有的内容，null 表示删除；旧提交后处理，自然收敛到最早提交的父内容
             Map<String, byte[]> desired = new LinkedHashMap<>();
             for (String commitId : commitIds) {
@@ -322,27 +344,20 @@ public final class ShadowRepository {
                     if (pathFilter != null && !pathFilter.equals(path)) {
                         continue;
                     }
-                    expected.putIfAbsent(path, contentIn(commitId, path));
                     desired.put(path, contentInParent(commitId, path));
                 }
             }
 
-            List<Map<String, Object>> conflicts = new ArrayList<>();
             List<String> applied = new ArrayList<>();
             for (Map.Entry<String, byte[]> entry : desired.entrySet()) {
-                String path = entry.getKey();
-                if (!sameAsWorkTree(path, expected.get(path))) {
-                    conflicts.add(conflict(path, "被其它会话或用户修改"));
-                    continue;
-                }
-                writeWorkTreeFile(path, entry.getValue());
-                applied.add(path);
+                writeWorkTreeFile(entry.getKey(), entry.getValue());
+                applied.add(entry.getKey());
             }
 
             String commitId = applied.isEmpty()
                     ? null
                     : commit(new LinkedHashSet<>(applied), summary, trailers);
-            return new RevertOutcome(commitId, applied, conflicts);
+            return new RevertOutcome(commitId, applied);
         });
     }
 
@@ -501,18 +516,6 @@ public final class ShadowRepository {
     }
 
     /**
-     * 读取某个提交里某文件的内容；文件不在该提交中时返回 null。
-     */
-    private byte[] contentIn(String commitId, String path) {
-        try (Git git = newGit(); RevWalk walk = new RevWalk(git.getRepository())) {
-            RevCommit commit = walk.parseCommit(ObjectId.fromString(commitId));
-            return contentIn(git.getRepository(), commit.getTree(), path);
-        } catch (IOException e) {
-            throw new UncheckedIOException("读取提交内容失败：" + commitId, e);
-        }
-    }
-
-    /**
      * 读取某个提交的父提交里某文件的内容；没有父提交或父提交里没有该文件时返回 null。
      */
     private byte[] contentInParent(String commitId, String path) {
@@ -539,24 +542,6 @@ public final class ShadowRepository {
             }
             ObjectLoader loader = repository.open(id);
             return loader.getBytes();
-        }
-    }
-
-    /**
-     * 工作区当前内容是否仍等于期望内容（null 表示期望文件不存在）。
-     */
-    private boolean sameAsWorkTree(String path, byte[] expected) {
-        Path file = workTree.resolve(path);
-        if (expected == null) {
-            return !Files.exists(file);
-        }
-        if (!Files.isRegularFile(file)) {
-            return false;
-        }
-        try {
-            return Arrays.equals(Files.readAllBytes(file), expected);
-        } catch (IOException e) {
-            return false;
         }
     }
 
@@ -623,13 +608,6 @@ public final class ShadowRepository {
 
     private static PersonIdent identity() {
         return new PersonIdent(AUTHOR, AUTHOR_EMAIL);
-    }
-
-    private static Map<String, Object> conflict(String path, String reason) {
-        Map<String, Object> conflict = new LinkedHashMap<>();
-        conflict.put("path", path);
-        conflict.put("reason", reason);
-        return conflict;
     }
 
     /**

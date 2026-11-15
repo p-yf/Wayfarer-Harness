@@ -147,6 +147,74 @@ class LoopTest {
     }
 
     @Test
+    void 取消时运行级收尾仍执行() throws Exception {
+        AtomicInteger modelRuns = new AtomicInteger();
+        AtomicInteger finished = new AtomicInteger();
+        CountDownLatch toolStarted = new CountDownLatch(1);
+        CountDownLatch resume = new CountDownLatch(1);
+
+        LoopChain modelChain = LoopChain.of((ctx, next) -> {
+            modelRuns.incrementAndGet();
+            ctx.put(AgentContext.MODEL_RESPONSE, responseWithToolCall());
+        });
+        LoopChain toolChain = LoopChain.of((ctx, next) -> {
+            toolStarted.countDown();
+            try {
+                resume.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException ignored) {
+            }
+        });
+        // 运行级链的后置逻辑写在 next 之后，取消后主循环 break、方法照常返回，后置仍会执行
+        Loop loop = new Loop(modelChain, toolChain) {
+            @Override
+            protected void execute(AgentContext context, Runnable core) {
+                try {
+                    core.run();
+                } finally {
+                    finished.incrementAndGet();
+                }
+            }
+        };
+
+        Disposable disposable = loop.run(new AgentContext()).subscribe();
+        assertTrue(toolStarted.await(5, TimeUnit.SECONDS));
+        disposable.dispose();
+        resume.countDown();
+
+        long deadline = System.currentTimeMillis() + 5000;
+        while (finished.get() == 0 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10);
+        }
+        assertEquals(1, finished.get(), "取消后运行级收尾应执行一次");
+        assertEquals(1, modelRuns.get());
+    }
+
+    @Test
+    void 运行异常时运行级收尾仍执行() {
+        AtomicInteger finished = new AtomicInteger();
+        LoopChain modelChain = LoopChain.of((ctx, next) -> {
+            throw new IllegalStateException("模型调用失败");
+        });
+        Loop loop = new Loop(modelChain, LoopChain.of((ctx, next) -> {
+        })) {
+            @Override
+            protected void execute(AgentContext context, Runnable core) {
+                try {
+                    core.run();
+                } finally {
+                    finished.incrementAndGet();
+                }
+            }
+        };
+
+        StepVerifier.create(loop.run(new AgentContext()))
+                .expectError(IllegalStateException.class)
+                .verify();
+
+        assertEquals(1, finished.get(), "异常终止也应执行运行级收尾");
+    }
+
+    @Test
     void 下游分批请求时消息仍逐步送出() throws Exception {
         CountDownLatch release = new CountDownLatch(1);
         CountDownLatch emitted = new CountDownLatch(1);

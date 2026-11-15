@@ -38,7 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @author yyf
  * @description 覆盖模型调用、记忆逐轮拼接、工具执行与消息推送顺序
  */
-class AgentChainTest {
+class LoopFlowTest {
 
     private HttpServer server;
     private ExecutorService serverExecutor;

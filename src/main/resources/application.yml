@@ -38,7 +38,6 @@ wayfarer:
   changes:
     enabled: true
     root: ./.wayfarer/shadow
-    allow-restore: false
     # 这些目录/文件不参与变更记录，写进影子仓库的 info/exclude，不修改工作区自己的 .gitignore
     exclude:
       - .git

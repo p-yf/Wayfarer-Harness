@@ -1,6 +1,5 @@
 package com.yf.wayfarer.agent.toolchain;
 
-import com.yf.wayfarer.loop.modelchain.ToolResultRepairHandler;
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.loop.LoopChain;
 import com.yf.wayfarer.loop.toolchain.ToolCallHandler;
@@ -22,12 +21,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * 工具链取消行为测试，使用真实工具反射调用。
  *
  * @author yyf
- * @description 验证运行被终止后剩余工具不再执行，但仍补一条结果保证消息配对
+ * @description 验证运行被终止后剩余工具不再执行，但仍补一条能说明原因的结果，保证消息配对
  */
 class ToolCallCancelTest {
 
     @Test
-    void 已终止时剩余工具不执行并补占位结果() {
+    void 已终止时剩余工具不执行并补终止说明() {
         CountingTools tools = new CountingTools();
         ToolCall toolCall = new ToolCall();
         toolCall.parse(tools);
@@ -45,7 +44,7 @@ class ToolCallCancelTest {
         assertEquals(0, tools.calls, "已终止时不应再执行工具");
         List<ChatMessage> messages = context.messages();
         assertEquals(1, messages.size(), "仍需补一条工具结果");
-        assertEquals(ToolResultRepairHandler.PLACEHOLDER, messages.get(0).content());
+        assertEquals(ToolCallLoopHandler.CANCELLED_RESULT, messages.get(0).content());
         assertEquals("call_1", messages.get(0).toolCallId());
     }
 

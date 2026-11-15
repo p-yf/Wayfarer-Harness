@@ -68,19 +68,30 @@ public final class HitlService {
      */
     public Map<String, Object> confirm(AgentContext context, String toolCallId, String toolName,
                                        String arguments, Map<String, Object> metadata) {
+        try {
+            return register(context, toolCallId, toolName, arguments, metadata).block();
+        } catch (RuntimeException e) {
+            // 超时或接口异常：由调用方自行判定如何处理
+            return null;
+        }
+    }
+
+    /**
+     * 只登记待确认项，不等待决定，返回等待结果的 Mono。
+     *
+     * <p>一批工具调用需要审批时，先把每个调用都登记进来（前端立刻能看到全部审批卡片），
+     * 再逐个 block 等待决定，避免「审批一个、执行一个、再弹下一个」的串行体验。</p>
+     */
+    public Mono<Map<String, Object>> register(AgentContext context, String toolCallId, String toolName,
+                                              String arguments, Map<String, Object> metadata) {
         requireText(toolCallId, "toolCallId");
         String agentName = context.get(AgentContext.AGENT_NAME, String.class);
         if (agentName == null || agentName.isBlank()) {
             agentName = DEFAULT_AGENT;
         }
-        try {
-            return wait(agentName, context, toolCallId, toolName,
-                    arguments == null ? "" : arguments,
-                    metadata == null ? Map.of() : metadata).block();
-        } catch (RuntimeException e) {
-            // 超时或接口异常：由调用方自行判定如何处理
-            return null;
-        }
+        return wait(agentName, context, toolCallId, toolName,
+                arguments == null ? "" : arguments,
+                metadata == null ? Map.of() : metadata);
     }
 
     /**

@@ -18,7 +18,6 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -112,8 +111,9 @@ class ShadowRepositoryTest {
     void diff返回改动内容() {
         write("a.txt", "v2");
         String commitId = commit(Set.of("a.txt"), "session-1", "trace-1", "write");
+        String parentId = repository.commits().get(0).parentId();
 
-        String patch = repository.diff(commitId, "a.txt");
+        String patch = repository.diffRange(parentId, commitId, "a.txt");
         assertTrue(patch.contains("-v1"), "补丁应包含删除行：" + patch);
         assertTrue(patch.contains("+v2"), "补丁应包含新增行：" + patch);
     }
@@ -129,7 +129,6 @@ class ShadowRepositoryTest {
                 trailers("session-1", "trace-1", "manual-revert"));
 
         assertNotNull(outcome.commitId());
-        assertTrue(outcome.conflicts().isEmpty());
         assertEquals("v2", read("a.txt"), "应恢复到该提交之前的版本");
         assertEquals("revert", repository.commits().get(0).tool());
     }
@@ -148,7 +147,7 @@ class ShadowRepositoryTest {
     }
 
     @Test
-    void 文件之后被手工改过时跳过撤销() {
+    void 文件之后被手工改过时以撤销内容覆盖() {
         write("a.txt", "v2");
         String commitId = commit(Set.of("a.txt"), "session-1", "trace-1", "write");
         // 模拟用户/其它会话在之后又改了同一个文件
@@ -157,10 +156,8 @@ class ShadowRepositoryTest {
         RevertOutcome outcome = repository.revert(List.of(commitId), "a.txt", "revert a.txt",
                 trailers("session-1", "trace-1", "manual-revert"));
 
-        assertNull(outcome.commitId(), "冲突时不应产生回退提交");
-        assertEquals(1, outcome.conflicts().size());
-        assertEquals("a.txt", outcome.conflicts().get(0).get("path"));
-        assertEquals("user-edit", read("a.txt"), "冲突路径不能被覆盖");
+        assertNotNull(outcome.commitId(), "覆盖式撤销应产生回退提交");
+        assertEquals("v1", read("a.txt"), "撤销优先：工作区后改的内容应被覆盖");
     }
 
     @Test

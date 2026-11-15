@@ -25,9 +25,27 @@ import java.util.stream.Stream;
 /**
  * 影子仓库的定位与缓存。
  *
+ * <p>磁盘结构：</p>
+ * <pre>
+ * &lt;wayfarer.changes.root&gt;/
+ *   └── &lt;工作区路径 sha1 前 16 位&gt;/
+ *       ├── git-dir/     JGit 仓库数据（在工作区之外，不污染用户目录）
+ *       └── meta.json    {"workspace":"D:/xxx","createdAt":"..."}
+ * </pre>
+ *
+ * <p>为什么用路径哈希做目录名：仓库必须跟<b>工作区</b>绑定，而不是跟会话绑定。
+ * 同一个目录被多个会话使用时，文件时间线才连续；哈希保证同一路径永远落到同一个仓库，
+ * 同时避免把带盘符、斜杠的路径直接当目录名。Windows 大小写不敏感，所以先转小写再哈希，
+ * 否则 {@code D:/Proj} 与 {@code d:/proj} 会算出两个仓库。</p>
+ *
+ * <p>为什么还要 meta.json：目录名只有哈希，反查不到原路径。重启后读回它，
+ * 才能把 work-tree 指回正确的工作区（也顺便保留用户当时传入的路径写法）。</p>
+ *
+ * <p>仓库对象会被缓存（惰性创建），{@link #all()} 则是扫描磁盘上所有已建仓库，
+ * 供「按会话查询」和「reset 回退」这类需要跨工作区的场景使用。</p>
+ *
  * @author yyf
- * @description 按工作区的绝对路径建仓库，路径做规范化后取 sha1 作为目录名，所以同一个目录
- * 无论用盘符大小写、带不带尾斜杠访问，都会落到同一个仓库；仓库跟工作区绑定，与会话无关
+ * @description 按工作区定位影子仓库、维护仓库目录与元数据，并提供全量枚举与删除
  */
 public final class ShadowRepositoryStore {
 
@@ -94,18 +112,6 @@ public final class ShadowRepositoryStore {
         } catch (IOException e) {
             throw new UncheckedIOException("读取影子仓库目录失败：" + root, e);
         }
-    }
-
-    /**
-     * 按提交 id 反查所属仓库，找不到返回 null。
-     */
-    public ShadowRepository forCommit(String commitId) {
-        for (ShadowRepository repository : all()) {
-            if (repository.contains(commitId)) {
-                return repository;
-            }
-        }
-        return null;
     }
 
     /**

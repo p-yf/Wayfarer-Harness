@@ -127,8 +127,13 @@
       if (limit) query.push("limit=" + limit);
       return request("GET", "/api/changes" + (query.length ? "?" + query.join("&") : ""));
     },
-    changeDiff: (commitId, path) =>
-      request("GET", "/api/changes/" + encodeURIComponent(commitId) + "/diff?path=" + encodeURIComponent(path)),
+    // 某个文件在一轮里的净变化：同一文件多次改动合并成一段补丁
+    changeFileDiff: (sessionId, traceId, path) => {
+      const query = ["path=" + encodeURIComponent(path)];
+      if (sessionId) query.push("sessionId=" + encodeURIComponent(sessionId));
+      if (traceId) query.push("traceId=" + encodeURIComponent(traceId));
+      return request("GET", "/api/changes/file-diff?" + query.join("&"));
+    },
     streamAgent: streamAgent
   };
 })();

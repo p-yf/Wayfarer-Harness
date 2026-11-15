@@ -2,7 +2,6 @@ package com.yf.wayfarer.change;
 
 import com.yf.wayfarer.loop.AgentContext;
 import com.yf.wayfarer.message.AgentMessage;
-import com.yf.wayfarer.toolcall.ToolCallInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -11,10 +10,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -22,10 +19,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 工具调用变更记录测试，使用真实文件系统与真实 JGit 仓库。
+ * 运行级变更记录测试，使用真实文件系统与真实 JGit 仓库。
  *
  * @author yyf
- * @description 覆盖写类工具成功记录、只读工具不记录、失败不记录三种情况
+ * @description 覆盖「一轮运行一条提交」、运行前已脏文件不记入本轮、无改动不提交、收尾幂等与汇总消息
  */
 class ChangeRecorderTest {
 
@@ -41,67 +38,73 @@ class ChangeRecorderTest {
         workspace = Files.createDirectories(temp.resolve("ws"));
         Files.writeString(workspace.resolve("seed.txt"), "seed", StandardCharsets.UTF_8);
         store = new ShadowRepositoryStore(temp.resolve("shadow"), List.of(".git", ".wayfarer"), true);
-        recorder = new ChangeRecorder(store);
+        recorder = new ChangeRecorder(store, new ChangeService(store));
     }
 
     @Test
-    void 写入成功后记录一条提交() {
+    void 一轮运行只产生一条提交() {
         AgentContext context = context();
-        ToolCallInfo info = new ToolCallInfo("call-1", "write", "{\"path\":\"a.txt\",\"content\":\"hello\"}");
-
-        ChangeRecorder.Snapshot snapshot = recorder.before(context, info);
-        assertNotNull(snapshot);
+        ChangeRecorder.Run run = recorder.begin(context);
+        assertNotNull(run);
+        // 模拟一轮运行里多个工具先后改了不同文件
         write("a.txt", "hello");
-        recorder.after(context, snapshot, "已写入 a.txt");
+        write("b.txt", "world");
+        recorder.finish(context, run);
 
-        ShadowRepository repository = store.forWorkspace(workspace.toString());
+        ShadowRepository repository = repository();
         List<ChangeCommit> commits = repository.commits();
-        // 一条基线 + 一条工具提交
-        assertEquals(2, commits.size());
+        assertEquals(2, commits.size(), "基线之外应只有一条运行级提交");
         ChangeCommit latest = commits.get(0);
-        assertEquals("write", latest.tool());
+        assertEquals(ChangeRecorder.RUN_TOOL, latest.tool());
         assertEquals("session-1", latest.sessionId());
         assertEquals("trace-1", latest.traceId());
-        assertEquals("call-1", latest.toolCallId());
+        assertEquals(2, repository.files(latest.commitId()).size(), "两个文件应合并进同一条提交");
     }
 
     @Test
-    void 只读工具不记录也不创建仓库() {
+    void 运行前已脏的文件不会被记入本轮() {
+        // 用户在运行开始前就手工改过 seed.txt
+        write("seed.txt", "user-edit");
         AgentContext context = context();
-        ToolCallInfo info = new ToolCallInfo("call-2", "read", "{\"path\":\"seed.txt\"}");
+        ChangeRecorder.Run run = recorder.begin(context);
 
-        assertNull(recorder.before(context, info));
+        write("a.txt", "from-agent");
+        recorder.finish(context, run);
+
+        ChangeCommit latest = repository().commits().get(0);
+        List<ChangeFile> files = repository().files(latest.commitId());
+        assertEquals(1, files.size(), "只应记录运行期间产生的改动");
+        assertEquals("a.txt", files.get(0).path());
     }
 
     @Test
-    void 工具失败时不留提交() {
+    void 没有文件差异时不产生提交() {
         AgentContext context = context();
-        ToolCallInfo info = new ToolCallInfo("call-3", "write", "{\"path\":\"b.txt\",\"content\":\"half\"}");
+        ChangeRecorder.Run run = recorder.begin(context);
+        recorder.finish(context, run);
 
-        ChangeRecorder.Snapshot snapshot = recorder.before(context, info);
-        // 模拟「写了一半就失败」：文件确实变了，但工具报告错误
-        write("b.txt", "half");
-        recorder.after(context, snapshot, "错误：写入文件失败：磁盘满了");
-
-        ShadowRepository repository = store.forWorkspace(workspace.toString());
-        assertEquals(1, repository.commits().size(), "失败调用不应产生提交");
-        assertTrue(repository.dirtyPaths().contains("b.txt"), "残留改动留给下一次成功提交带走");
+        assertEquals(1, repository().commits().size(), "没有改动时只保留基线提交");
     }
 
     @Test
-    void 轮次结束时汇总本轮变更供页面展示() {
-        ShadowRepository repository = store.forWorkspace(workspace.toString());
-        repository.ensure();
+    void 收尾重复调用只提交一次() {
+        AgentContext context = context();
+        ChangeRecorder.Run run = recorder.begin(context);
         write("a.txt", "hello");
-        Map<String, String> trailers = new LinkedHashMap<>();
-        trailers.put(ShadowRepository.TRAILER_SESSION, "session-1");
-        trailers.put(ShadowRepository.TRAILER_TRACE, "trace-1");
-        trailers.put(ShadowRepository.TRAILER_TOOL, "write");
-        trailers.put(ShadowRepository.TRAILER_CALL, "call-1");
-        repository.commit(Set.of("a.txt"), "write a.txt", trailers);
+        recorder.finish(context, run);
+        recorder.finish(context, run);
 
-        ChangeRecorder recorder = new ChangeRecorder(store, new ChangeService(store));
-        AgentMessage message = recorder.summary(context());
+        assertEquals(2, repository().commits().size(), "取消与完成回调叠加时不应重复提交");
+    }
+
+    @Test
+    void 运行结束后汇总本轮变更供页面展示() {
+        AgentContext context = context();
+        ChangeRecorder.Run run = recorder.begin(context);
+        write("a.txt", "hello");
+        recorder.finish(context, run);
+
+        AgentMessage message = recorder.summary(context);
 
         assertTrue(message instanceof AgentMessage.Other, "有变更时应返回一条 other 消息");
         Map<?, ?> data = (Map<?, ?>) ((AgentMessage.Other) message).message();
@@ -113,6 +116,31 @@ class ChangeRecorderTest {
         AgentContext other = context();
         other.put(AgentContext.TRACE_ID, "trace-empty");
         assertNull(recorder.summary(other));
+    }
+
+    @Test
+    void 按文件聚合整轮净变化() {
+        // 同一会话的两轮各自改了 a.txt，按文件应得到从最初到最终的净变化
+        AgentContext first = context();
+        ChangeRecorder.Run firstRun = recorder.begin(first);
+        write("a.txt", "v1");
+        recorder.finish(first, firstRun);
+
+        AgentContext second = context();
+        ChangeRecorder.Run secondRun = recorder.begin(second);
+        write("a.txt", "v2");
+        recorder.finish(second, secondRun);
+
+        Map<String, Object> result = new ChangeService(store).fileDiff("session-1", null, "a.txt");
+
+        String patch = String.valueOf(result.get("patch"));
+        assertEquals("a.txt", result.get("path"));
+        assertTrue(patch.contains("+v2"), "应展示最终内容：" + patch);
+        assertTrue(!patch.contains("+v1"), "中间状态不应单独出现：" + patch);
+    }
+
+    private ShadowRepository repository() {
+        return store.forWorkspace(workspace.toString());
     }
 
     private AgentContext context() {

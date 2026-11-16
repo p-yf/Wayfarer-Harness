@@ -56,6 +56,8 @@ public final class SubAgentSupervisor implements ChainHandler {
         }
         if (context.isCancelled()) {
             manager.cancelSession(sessionId);
+            // 取消会立刻结束结果 future，但子任务线程可能还在写终态消息，等它安静后再继续收尾
+            manager.awaitQuiet(sessionId, finishWaitSeconds);
         } else {
             manager.awaitSession(sessionId, finishWaitSeconds);
         }

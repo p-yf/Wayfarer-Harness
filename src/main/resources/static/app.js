@@ -1361,7 +1361,8 @@
 
   async function pollHitl() {
     try {
-      const pending = await Api.hitlPending();
+      // 只取当前会话最早的一条，后端保证一次只放出一条，不会同时弹出多张卡片
+      const pending = await Api.hitlPending(state.currentId);
       const json = JSON.stringify(pending);
       if (json === state.hitlJson) return;
       state.hitlJson = json;

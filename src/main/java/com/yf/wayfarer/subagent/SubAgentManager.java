@@ -175,6 +175,8 @@ public final class SubAgentManager {
         if (running == null) {
             return;
         }
+        // 先置标记：取消与子任务启动并发时，后登记的钩子也能立即执行
+        running.cancelled = true;
         for (Runnable hook : running.cancelHooks) {
             try {
                 hook.run();
@@ -218,6 +220,27 @@ public final class SubAgentManager {
     }
 
     /**
+     * 等待会话内子任务线程退出（含超时）。
+     * 取消是被打断的，结果 future 会立刻结束，但子任务线程可能还在写终态消息；
+     * 收尾前等它安静下来，TRACE_END 才能是最后一条。
+     */
+    public void awaitQuiet(String sessionId, long timeoutSeconds) {
+        Running running = sessions.get(sessionId);
+        if (running == null) {
+            return;
+        }
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(Math.max(1, timeoutSeconds));
+        while (running.active.get() > 0 && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
+    /**
      * 子任务终态列表，写入 TRACE_END 的 children 字段。
      */
     public List<Map<String, Object>> children(String sessionId) {
@@ -254,7 +277,12 @@ public final class SubAgentManager {
      * 注册子 Agent 的取消钩子，取消时由管理器统一触发。
      */
     public void onCancel(String sessionId, Runnable hook) {
-        sessions.computeIfAbsent(sessionId, key -> new Running()).cancelHooks.add(hook);
+        Running running = sessions.computeIfAbsent(sessionId, key -> new Running());
+        running.cancelHooks.add(hook);
+        // 取消可能发生在子Agent真正启动之前，补一次立即执行，避免漏掉这次终止
+        if (running.cancelled) {
+            hook.run();
+        }
     }
 
     private boolean tryAcquire(Running running) {
@@ -338,5 +366,9 @@ public final class SubAgentManager {
         private final Set<String> keys = new CopyOnWriteArraySet<>();
         private final Set<Runnable> cancelHooks = new CopyOnWriteArraySet<>();
         private final Map<String, ChildInfo> children = new ConcurrentHashMap<>();
+        /**
+         * 本会话是否已被级联取消，供晚到的取消钩子判断。
+         */
+        private volatile boolean cancelled;
     }
 }

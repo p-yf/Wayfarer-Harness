@@ -68,6 +68,13 @@ public final class SubAgentTools {
         if (asyncMode) {
             return "{\"uuid\":\"" + submission.uuid() + "\",\"status\":\"running\"}";
         }
+        // 同步等待期间 root 被终止时先停掉子Agent：否则这里的等待会卡到子任务超时，
+        // 主循环迟迟收不了尾，会话一直处于运行中，后续请求都会被准入拒绝
+        agentContext.onCancel(() -> manager.cancelSession(sessionId));
+        // 取消可能恰好发生在登记钩子之前，这里补一次判断避免漏掉终止信号
+        if (agentContext.isCancelled()) {
+            manager.cancelSession(sessionId);
+        }
         SubAgentResult result = manager.await(submission.uuid());
         return result == null ? "<sys-子Agent结果不可用>" : render(result);
     }
@@ -82,6 +89,13 @@ public final class SubAgentTools {
                          @ToolParam(description = "是否阻塞等待，默认 false", required = false) Boolean wait) {
         if (uuid == null || uuid.isBlank()) {
             return "<sys-uuid 不能为空>";
+        }
+        // 阻塞读取期间 root 被终止时同样先停掉子Agent，避免主循环卡在这里收不了尾
+        if (Boolean.TRUE.equals(wait)) {
+            agentContext.onCancel(() -> manager.cancelSession(agentContext.sessionId()));
+            if (agentContext.isCancelled()) {
+                manager.cancelSession(agentContext.sessionId());
+            }
         }
         SubAgentManager.Query query = manager.read(uuid.trim(), Boolean.TRUE.equals(wait));
         if (query.missing()) {

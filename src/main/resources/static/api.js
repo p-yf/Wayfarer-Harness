@@ -98,7 +98,8 @@
       request("POST", "/api/sessions/" + encodeURIComponent(id) + "/reset?traceId=" + encodeURIComponent(traceId)),
     stopAgent: (id) => request("POST", "/api/agent/stop/" + encodeURIComponent(id)),
     listWorkspace: (path) => request("GET", "/api/workspace/list" + (path ? "?path=" + encodeURIComponent(path) : "")),
-    hitlPending: () => request("GET", "/api/hitl/pending"),
+    // 同一会话一次只返回最早的一条待确认项，提交后下一条才会出现
+    hitlPending: (sessionId) => request("GET", "/api/hitl/pending" + (sessionId ? "?session=" + encodeURIComponent(sessionId) : "")),
     // decision 形如 {"sheet1": "key1"}，与待确认项 metadata 的页名、选项键一一对应
     // key 是「agentId/toolCallId」复合键，父子 Agent 的同名工具调用互不冲突
     hitlDecide: (key, decision) =>

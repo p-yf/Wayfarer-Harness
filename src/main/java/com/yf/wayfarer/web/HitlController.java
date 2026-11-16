@@ -29,11 +29,13 @@ public class HitlController {
     }
 
     /**
-     * 待确认列表，agent 为空时返回全部。
+     * 当前可展示的待确认项。同一会话一次只返回最早登记的一条，
+     * 提交决定后下一条才会出现，避免前端一次弹出多张审批卡片。
      */
     @GetMapping("/pending")
-    public List<HitlService.Pending> pending(@RequestParam(name = "agent", required = false) String agent) {
-        return hitlService.pending(agent);
+    public List<HitlService.Pending> pending(@RequestParam(name = "session", required = false) String session,
+                                             @RequestParam(name = "agent", required = false) String agent) {
+        return hitlService.next(session, agent);
     }
 
     /**

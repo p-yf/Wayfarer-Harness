@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 人工确认（HITL）协调器。
@@ -38,6 +39,11 @@ public final class HitlService {
 
     private final Map<String, Sinks.One<Map<String, Object>>> waiting = new ConcurrentHashMap<>();
     private final Map<String, Pending> pendings = new ConcurrentHashMap<>();
+    /**
+     * 登记顺序，前端一次只展示最早的一条，靠它稳定排序。
+     */
+    private final Map<String, Long> order = new ConcurrentHashMap<>();
+    private final AtomicLong sequence = new AtomicLong();
     private final long timeoutSeconds;
 
     public HitlService(long timeoutSeconds) {
@@ -80,8 +86,8 @@ public final class HitlService {
     /**
      * 只登记待确认项，不等待决定，返回等待结果的 Mono。
      *
-     * <p>一批工具调用需要审批时，先把每个调用都登记进来（前端立刻能看到全部审批卡片），
-     * 再逐个 block 等待决定，避免「审批一个、执行一个、再弹下一个」的串行体验。</p>
+     * <p>多个工具调用同时需要审批时各自登记，但 {@link #next} 一次只放出一条，
+     * 前端提交后下一条才会出现，不会同时弹出多张卡片。</p>
      */
     public Mono<Map<String, Object>> register(AgentContext context, String toolCallId, String toolName,
                                               String arguments, Map<String, Object> metadata) {
@@ -131,6 +137,23 @@ public final class HitlService {
     }
 
     /**
+     * 当前可展示的待确认项：同一会话同一时刻只返回最早登记的一条，其余排队。
+     *
+     * @description 上一条提交决定后才会轮到下一条，避免前端轮询时一次弹出多张审批卡片；
+     * sessionId 为空时按全局最早一条返回
+     */
+    public List<Pending> next(String sessionId, String agentName) {
+        Pending head = pendings.values().stream()
+                .filter(item -> sessionId == null || sessionId.isBlank()
+                        || sessionId.equals(item.sessionId()))
+                .filter(item -> agentName == null || agentName.isBlank()
+                        || agentName.equals(item.agentName()))
+                .min(Comparator.comparingLong(item -> order.getOrDefault(item.key(), Long.MAX_VALUE)))
+                .orElse(null);
+        return head == null ? List.of() : List.of(head);
+    }
+
+    /**
      * 上下文中的确认键，约定为 HITL+agentId/toolCallId，避免父子 Agent 的 call_0 冲突。
      */
     public static String key(String agentId, String toolCallId) {
@@ -145,6 +168,8 @@ public final class HitlService {
         if (waiting.putIfAbsent(key, sink) != null) {
             throw new IllegalStateException("重复的工具调用 id：" + key);
         }
+        // 登记顺序决定审批展示顺序，先写序号再登记，避免查询时读到没有序号的待确认项
+        order.put(key, sequence.incrementAndGet());
         pendings.put(key, new Pending(key, agentId, toolCallId, agentName, context.sessionId(),
                 toolName, arguments, metadata, Instant.now()));
         context.put(key(agentId, toolCallId), sink.asMono());
@@ -156,6 +181,7 @@ public final class HitlService {
                 .doFinally(signal -> {
                     waiting.remove(key);
                     pendings.remove(key);
+                    order.remove(key);
                 });
     }
 

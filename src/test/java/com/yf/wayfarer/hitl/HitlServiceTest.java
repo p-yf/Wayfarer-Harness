@@ -93,6 +93,61 @@ class HitlServiceTest {
 
     @Test
     @Timeout(10)
+    void 同一会话一次只放出一条待确认项() {
+        HitlService service = new HitlService(5);
+        AgentContext first = contextOf("call_1", "shell");
+        AgentContext second = contextOf("call_2", "write_file");
+        AtomicReference<Map<String, Object>> firstDecision = new AtomicReference<>();
+        AtomicReference<Map<String, Object>> secondDecision = new AtomicReference<>();
+
+        Thread worker1 = awaitInThread(service, first, firstDecision);
+        awaitPending(service, 1);
+        Thread worker2 = awaitInThread(service, second, secondDecision);
+        awaitPending(service, 2);
+
+        List<HitlService.Pending> visible = service.next("session-1", null);
+        assertEquals(1, visible.size(), "即使同时有多条待办，也只放出一条");
+        assertEquals("call_1", visible.get(0).toolCallId());
+
+        assertTrue(service.complete(visible.get(0).key(), Map.of("approved", true)));
+        List<HitlService.Pending> afterFirst = service.next("session-1", null);
+        assertEquals(1, afterFirst.size());
+        assertEquals("call_2", afterFirst.get(0).toolCallId(), "前一条处理完才轮到下一条");
+
+        assertTrue(service.complete(afterFirst.get(0).key(), Map.of("approved", false)));
+        join(worker1);
+        join(worker2);
+
+        assertTrue(service.next("session-1", null).isEmpty());
+        assertEquals(true, firstDecision.get().get("approved"));
+        assertEquals(false, secondDecision.get().get("approved"));
+    }
+
+    @Test
+    @Timeout(10)
+    void 其他会话的待确认项不影响当前会话() {
+        HitlService service = new HitlService(5);
+        AgentContext current = contextOf("call_1", "shell");
+        AgentContext other = contextOf("call_2", "shell");
+        other.put(AgentContext.SESSION_ID, "session-2");
+
+        Thread worker1 = awaitInThread(service, current, new AtomicReference<>());
+        awaitPending(service, 1);
+        Thread worker2 = awaitInThread(service, other, new AtomicReference<>());
+        awaitPending(service, 2);
+
+        List<HitlService.Pending> visible = service.next("session-2", null);
+        assertEquals(1, visible.size());
+        assertEquals("call_2", visible.get(0).toolCallId(), "只返回指定会话的待确认项");
+
+        service.complete("call_1", Map.of());
+        service.complete("call_2", Map.of());
+        join(worker1);
+        join(worker2);
+    }
+
+    @Test
+    @Timeout(10)
     void 超时后返回null并清理待办() {
         HitlService service = new HitlService(1);
         AgentContext context = contextOf("call_1", "shell");

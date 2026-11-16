@@ -146,6 +146,57 @@ class SubAgentManagerTest {
         }
     }
 
+    @Test
+    void 取消后新登记的钩子立即执行() throws Exception {
+        SubAgentManager manager = new SubAgentManager(3, 30);
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            manager.submit(SESSION, "call-1", AGENT_NAME, (uuid, agentId) -> {
+                started.countDown();
+                awaitQuietly(release);
+                return SubAgentResult.completed(agentId, "结束", 1L);
+            });
+            assertTrue(started.await(5, TimeUnit.SECONDS));
+            manager.cancelSession(SESSION);
+
+            // 取消与子任务启动并发时，晚到的钩子也必须立即执行，不能漏掉这次终止
+            AtomicBoolean lateHook = new AtomicBoolean();
+            manager.onCancel(SESSION, () -> lateHook.set(true));
+            assertTrue(lateHook.get());
+        } finally {
+            release.countDown();
+            manager.closeSession(SESSION);
+        }
+    }
+
+    @Test
+    void 取消后阻塞等待立即返回() throws Exception {
+        SubAgentManager manager = new SubAgentManager(3, 30);
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            SubAgentManager.Submission submission = manager.submit(SESSION, "call-1", AGENT_NAME,
+                    (uuid, agentId) -> {
+                        started.countDown();
+                        awaitQuietly(release);
+                        return SubAgentResult.completed(agentId, "结束", 1L);
+                    });
+            assertTrue(started.await(5, TimeUnit.SECONDS));
+
+            manager.cancelSession(SESSION);
+            long begin = System.nanoTime();
+            SubAgentResult result = manager.await(submission.uuid());
+            long costMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - begin);
+
+            assertNull(result, "取消后不应再返回结果");
+            assertTrue(costMs < 1000, "取消后等待应立即返回，实际耗时 " + costMs + "ms");
+        } finally {
+            release.countDown();
+            manager.closeSession(SESSION);
+        }
+    }
+
     /**
      * 轮询到结果被消费为止，避免依赖固定睡眠时间。
      */

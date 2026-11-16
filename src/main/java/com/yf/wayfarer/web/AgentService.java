@@ -172,6 +172,8 @@ public class AgentService {
             return false;
         }
         subscription.cancel();
+        // 主循环可能正阻塞等待子 Agent，先级联终止，避免收尾被拖到子任务超时
+        subAgentManager.cancelSession(sessionId);
         return true;
     }
 

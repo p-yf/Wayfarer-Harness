@@ -74,6 +74,17 @@ public sealed interface AgentMessage {
     }
 
     /**
+     * 子 Agent 产生的消息。
+     *
+     * @author yyf
+     * @description 外层包一层归属信息：agentId 为子 Agent 实例 id，
+     * viaToolCallId 为派发它的那次工具调用 id；delegate 是真正的消息内容
+     */
+    record Child(String traceId, String agentId, String viaToolCallId, AgentMessage delegate)
+            implements AgentMessage {
+    }
+
+    /**
      * 其他消息。
      *
      * @author yyf

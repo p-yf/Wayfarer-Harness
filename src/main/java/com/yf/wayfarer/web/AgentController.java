@@ -1,6 +1,7 @@
 package com.yf.wayfarer.web;
 
 import com.yf.wayfarer.message.AgentMessage;
+import com.yf.wayfarer.trace.TraceBusyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
@@ -63,6 +64,15 @@ public class AgentController {
                 .concatMap(SseEvents::of)
                 // 流提交后抛出的异常无法再改写 http 状态，转成一条事件，避免连接被直接掐断
                 .onErrorResume(error -> {
+                    if (error instanceof TraceBusyException busy) {
+                        log.warn("拒绝并发运行 sessionId={} running={}", sessionId, busy.runningTraceId());
+                        Map<String, Object> data = new LinkedHashMap<>();
+                        data.put("type", "error");
+                        data.put("code", "TRACE_BUSY");
+                        data.put("traceId", busy.runningTraceId());
+                        data.put("message", busy.getMessage());
+                        return Flux.just(ServerSentEvent.builder((Object) data).event("error").build());
+                    }
                     log.error("流式运行失败 sessionId={}", sessionId, error);
                     return Flux.just(SseEvents.error(error));
                 });

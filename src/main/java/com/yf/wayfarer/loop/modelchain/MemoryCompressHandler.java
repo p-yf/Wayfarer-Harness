@@ -126,6 +126,10 @@ public class MemoryCompressHandler implements ChainHandler {
      * 不落盘的话压缩只在本轮内存里有效，下一轮恢复会话又会被完整历史覆盖回去，压缩等于没做。
      */
     private void persistSnapshot(AgentContext context, List<ChatMessage> messages) {
+        // 只有 root 能写 COMPACT；子 Agent 允许在内存中压缩，否则父下次恢复会把子记忆当基线
+        if (context.origin() != null) {
+            return;
+        }
         Session session = context.session();
         String sessionId = context.sessionId();
         if (session == null || sessionId == null) {

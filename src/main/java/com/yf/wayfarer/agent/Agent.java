@@ -26,6 +26,7 @@ import com.yf.wayfarer.session.UnloadedMessageStore;
 import com.yf.wayfarer.skill.SkillStore;
 import com.yf.wayfarer.toolcall.ToolCall;
 import com.yf.wayfarer.toolcall.ToolDefinition;
+import com.yf.wayfarer.trace.StoreStatePersistHandler;
 import reactor.core.publisher.Flux;
 
 import java.util.LinkedHashMap;
@@ -69,7 +70,8 @@ public class Agent extends Loop {
                  Integer maxTurns, Session session, UnloadedMessageStore unloadedStore,
                  MemoryCompactConfig compact, HitlService hitl, SkillStore skillStore) {
         this(session, defaultModelChain(model, tools, unloadedStore, compact, skillStore),
-                defaultToolChain(toolCall, hitl), LoopChain.of(), maxTurns);
+                defaultToolChain(toolCall, hitl),
+                LoopChain.of(new StoreStatePersistHandler()), maxTurns);
     }
 
     /**
@@ -82,6 +84,13 @@ public class Agent extends Loop {
         }
         session.restore(sessionId, context);
         context.put(AgentContext.SESSION, session);
+        // root 的实例标识与派生基线：子 Agent 名称与归属都从它派生
+        context.put(AgentContext.AGENT_ID, "root");
+        context.put(AgentContext.DEPTH, 0);
+        String agentName = context.get(AgentContext.AGENT_NAME, String.class);
+        if (agentName != null) {
+            context.put(AgentContext.ROOT_AGENT_NAME, agentName);
+        }
         // 调用方可通过上下文预置 trace id，使本轮问答归入同一次运行
         String provided = context.traceId();
         String traceId = provided == null || provided.isBlank()
@@ -93,17 +102,11 @@ public class Agent extends Loop {
 
     /**
      * 把主循环包进运行级链：前置逻辑在运行前，后置逻辑在运行后。
-     * 无论正常结束、异常还是被取消，finally 都会把可持久化状态写入会话。
+     * 可持久化状态、变更汇总与 TRACE_END 都由运行级链上的处理器负责收尾。
      */
     @Override
     protected void execute(AgentContext context, Runnable core) {
-        String sessionId = context.sessionId();
-        String traceId = context.traceId();
-        try {
-            runChain.run(context, core);
-        } finally {
-            persistStoreState(context, sessionId, traceId);
-        }
+        runChain.run(context, core);
     }
 
     /**
@@ -131,16 +134,5 @@ public class Agent extends Loop {
         return LoopChain.of(new AssistantAndToolCallPersistHandler(),
                 new ToolCallLoopHandler(), new ToolCircleCheckHandler(),
                 new CodingToolApprovalHandler(hitl), new ToolCallHandler(toolCall));
-    }
-
-    /**
-     * 循环结束后把上下文中的可持久化状态写入一条 CUSTOM 消息。
-     */
-    private void persistStoreState(AgentContext context, String sessionId, String traceId) {
-        Map<String, Object> store = new LinkedHashMap<>(context.storeState());
-        if (store.isEmpty()) {
-            return;
-        }
-        session.append(sessionId, JSONMsgType.CUSTOM, traceId, store);
     }
 }

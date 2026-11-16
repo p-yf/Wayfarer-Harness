@@ -10,6 +10,8 @@ import com.yf.wayfarer.session.Session;
 import com.yf.wayfarer.session.UnloadedMessageStore;
 import com.yf.wayfarer.skill.SkillFileSystem;
 import com.yf.wayfarer.skill.SkillStore;
+import com.yf.wayfarer.subagent.SubAgentManager;
+import com.yf.wayfarer.trace.TraceStatus;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -70,5 +72,18 @@ public class SessionConfiguration {
     public ConfigStore<MemoryCompactConfig> compactConfigStore(
             @Value("${wayfarer.memory-compact-config.root:./memorycompactconfig}") String root) {
         return new ConfigStore<>(Path.of(root), MemoryCompactConfig.class);
+    }
+
+    @Bean
+    public TraceStatus traceStatus(Session session) {
+        // 准入状态需要读会话文件做崩溃恢复，因此依赖 Session
+        return new TraceStatus(session);
+    }
+
+    @Bean
+    public SubAgentManager subAgentManager(
+            @Value("${wayfarer.subagent.max-children:3}") int maxChildren,
+            @Value("${wayfarer.subagent.task-timeout-seconds:600}") long taskTimeoutSeconds) {
+        return new SubAgentManager(maxChildren, taskTimeoutSeconds);
     }
 }

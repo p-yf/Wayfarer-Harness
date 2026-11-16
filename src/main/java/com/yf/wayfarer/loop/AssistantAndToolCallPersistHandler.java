@@ -51,7 +51,7 @@ public class AssistantAndToolCallPersistHandler implements ChainHandler {
             if (type == null) {
                 continue;
             }
-            session.append(sessionId, type, traceId, SessionMessage.toMap(message));
+            session.append(sessionId, type, traceId, SessionMessage.toMap(message), context.origin());
         }
     }
 

@@ -131,10 +131,11 @@ public final class SystemPromptStore {
             return Optional.empty();
         }
         String base = fileName.substring(0, fileName.length() - SUFFIX.length());
-        if (!base.startsWith(agent + "-")) {
+        String prefix = sanitize(agent) + "-";
+        if (!base.startsWith(prefix)) {
             return Optional.empty();
         }
-        String rest = base.substring(agent.length() + 1);
+        String rest = base.substring(prefix.length());
         int separator = rest.lastIndexOf('-');
         if (separator <= 0) {
             return Optional.empty();
@@ -170,9 +171,11 @@ public final class SystemPromptStore {
     }
 
     /**
-     * 文件名不允许出现路径分隔符与冒号，短横线是分隔符，统一替换为下划线。
+     * 文件名不允许出现路径分隔符与冒号：统一转小写，非法字符替换为短横线。
+     * 派生名 `wayfarerpro:subagent` 因此落到 `wayfarerpro-subagent-*.md`，与本类的解析规则一致。
      */
     private static String sanitize(String value) {
-        return value.trim().replaceAll("[\\\\/:*?\"<>|\\-]+", "_");
+        return value.trim().toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[\\\\/:*?\"<>|]+", "-");
     }
 }

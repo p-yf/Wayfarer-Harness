@@ -37,20 +37,24 @@ public class HitlController {
     }
 
     /**
-     * 写入确认决定。请求体需包含 toolCallId，整个请求体作为决定交给工具链。
+     * 写入确认决定。请求体需包含 key（agentId/toolCallId 复合键）；
+     * 旧调用只带 toolCallId 时按唯一后缀匹配。
      */
     @PostMapping
     public Map<String, Object> complete(@RequestBody Map<String, Object> body) {
-        Object raw = body.get("toolCallId");
-        String toolCallId = raw == null ? null : String.valueOf(raw).trim();
-        if (toolCallId == null || toolCallId.isEmpty()) {
-            throw new IllegalArgumentException("缺少参数：toolCallId");
+        Object rawKey = body.get("key");
+        Object rawId = body.get("toolCallId");
+        String key = rawKey != null && !String.valueOf(rawKey).isBlank()
+                ? String.valueOf(rawKey).trim()
+                : rawId == null ? null : String.valueOf(rawId).trim();
+        if (key == null || key.isEmpty()) {
+            throw new IllegalArgumentException("缺少参数：key");
         }
-        if (!hitlService.complete(toolCallId, body)) {
-            throw new IllegalArgumentException("没有等待中的确认请求：" + toolCallId);
+        if (!hitlService.complete(key, body)) {
+            throw new IllegalArgumentException("没有等待中的确认请求：" + key);
         }
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("toolCallId", toolCallId);
+        result.put("key", key);
         result.put("delivered", true);
         return result;
     }

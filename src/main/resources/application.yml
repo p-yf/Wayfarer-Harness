@@ -29,8 +29,15 @@ wayfarer:
   memory-compact-config:
     root: ./.wayfarer/memorycompactconfig
   agent:
+    # 默认 agent；wayfarerpro 在 wayfarer 全部工具之外额外提供子 Agent 派发与取结果
     name: wayfarer
     max-turns:
+  # 子 Agent：单会话最多同时运行 3 个，单任务超时 600s，派生深度最多 2 层
+  subagent:
+    max-children: 3
+    task-timeout-seconds: 600
+    max-depth: 2
+    finish-wait-seconds: 10
   # 人工确认：等待工具确认的最长秒数，超时按未批准处理
   hitl:
     timeout-seconds: 300

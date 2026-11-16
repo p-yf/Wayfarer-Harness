@@ -3,6 +3,7 @@ package com.yf.wayfarer.loop;
 import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.model.ModelResponse;
+import com.yf.wayfarer.session.MessageOrigin;
 import com.yf.wayfarer.session.Session;
 import com.yf.wayfarer.toolcall.ToolCallInfo;
 import com.yf.wayfarer.toolcall.ToolContext;
@@ -72,6 +73,26 @@ public final class AgentContext implements ToolContext {
      * 当前 agent 名称，由调用方在运行前写入，HITL 确认键与提示词目录都依赖它。
      */
     public static final String AGENT_NAME = "agentName";
+
+    /**
+     * root agent 名称：子 Agent 名称由它派生为 `{rootAgent}:subagent`，不作为独立 agent 注册。
+     */
+    public static final String ROOT_AGENT_NAME = "rootAgentName";
+
+    /**
+     * 当前 Agent 实例 id：root 为 "root"，子 Agent 为本轮唯一的 "sub-xxxx"。
+     */
+    public static final String AGENT_ID = "agentId";
+
+    /**
+     * 消息归属：root 不设置（null），子 Agent 设置为 {@link com.yf.wayfarer.session.MessageOrigin}。
+     */
+    public static final String ORIGIN = "origin";
+
+    /**
+     * 派生深度：root 为 0，直接子 Agent 为 1，依此类推。
+     */
+    public static final String DEPTH = "depth";
 
     /**
      * 工作区目录，由调用方在运行前写入，文件类工具的相对路径基于它解析。
@@ -240,6 +261,35 @@ public final class AgentContext implements ToolContext {
      */
     public String userQuery() {
         return get(USER_QUERY, String.class);
+    }
+
+    /**
+     * 当前 Agent 实例 id，未设置时为 null。
+     */
+    public String agentId() {
+        return get(AGENT_ID, String.class);
+    }
+
+    /**
+     * root agent 名称，未设置时为 null。
+     */
+    public String rootAgentName() {
+        return get(ROOT_AGENT_NAME, String.class);
+    }
+
+    /**
+     * 派生深度，未设置时视为 0。
+     */
+    public int depth() {
+        Integer depth = get(DEPTH, Integer.class);
+        return depth == null ? 0 : depth;
+    }
+
+    /**
+     * 消息归属，root 返回 null。
+     */
+    public MessageOrigin origin() {
+        return get(ORIGIN, MessageOrigin.class);
     }
 
     /**

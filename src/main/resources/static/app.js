@@ -7,9 +7,12 @@
   const inputEl = $("input");
   const emptyStateEl = $("emptyState");
   const esc = window.Markdown.escapeHtml;
-  const AGENT_NAME = "Wayfarer";
+  const AGENT_STORAGE_KEY = "wayfarer.agent";
+  const AGENT_NAMES = ["wayfarer", "wayfarerpro"];
 
   const state = {
+    // 当前 agent 名称：后端按名称装配不同工具集，默认 wayfarer
+    agent: readStoredAgent(),
     sessions: [],
     // 每个会话一份运行视图，流式输出不会因为切换会话而中断或串台
     views: {},
@@ -453,6 +456,40 @@
     renderApproval();
   }
 
+  /** 读取本地保存的 agent 名称，非法值回退到 wayfarer */
+  function readStoredAgent() {
+    try {
+      const stored = localStorage.getItem(AGENT_STORAGE_KEY);
+      return AGENT_NAMES.indexOf(stored) >= 0 ? stored : "wayfarer";
+    } catch (_) {
+      return "wayfarer";
+    }
+  }
+
+  function renderAgent() {
+    $("agentName").textContent = state.agent;
+    $("agentBtn").classList.toggle("set", state.agent === "wayfarerpro");
+    for (const option of $("agentMenu").querySelectorAll(".perm-option")) {
+      option.classList.toggle("active", option.dataset.agent === state.agent);
+    }
+    $("agentBtn").title = state.agent === "wayfarerpro"
+      ? "当前 Agent：wayfarerpro（标准能力 + 子 Agent 派发）"
+      : "当前 Agent：wayfarer";
+  }
+
+  function selectAgent(name) {
+    if (AGENT_NAMES.indexOf(name) < 0) return;
+    state.agent = name;
+    try {
+      localStorage.setItem(AGENT_STORAGE_KEY, name);
+    } catch (_) {
+      // 隐私模式下写不进去不影响本次会话
+    }
+    renderAgent();
+    // 提示词面板按 agent 区分，切换后刷新当前面板
+    if (state.panel.open && state.panel.view === "prompt") loadPanel();
+  }
+
   function renderApproval() {
     $("approvalName").textContent = APPROVAL_LABELS[state.approval] || APPROVAL_LABELS.no;
     $("approvalBtn").classList.toggle("set", state.approval !== "no");
@@ -639,11 +676,42 @@
   function historyToBlocks(messages, changeSummary) {
     const blocks = [];
     const toolsById = {};
+    // 子 Agent 消息按 viaToolCallId 归组，稍后挂到派发它的工具卡片下
+    const childLogs = {};
     const headTraces = new Set();
     // 每轮助手消息中工具卡片在 blocks 中的起始下标，用于把调用记录插在文字之后、工具之前
     const toolStart = {};
     for (const msg of messages || []) {
       const content = msg.content || {};
+      if (msg.origin && msg.origin.viaToolCallId) {
+        const log = childLogs[msg.origin.viaToolCallId] ||
+          (childLogs[msg.origin.viaToolCallId] = []);
+        if (msg.type === "ASSISTANT") {
+          if (content.reasoningContent) {
+            log.push({ kind: "reasoning", content: content.reasoningContent, open: false, depth: 1 });
+          }
+          if (content.content) {
+            log.push({ kind: "text", content: content.content, depth: 1 });
+          }
+          for (const call of content.toolCalls || []) {
+            const block = {
+              kind: "tool", id: call.id, name: call.name, arguments: call.arguments,
+              result: null, open: false, depth: 1
+            };
+            toolsById[call.id] = block;
+            log.push(block);
+          }
+        } else if (msg.type === "TOOL") {
+          const block = toolsById[content.toolCallId];
+          if (block) block.result = content.content || "";
+        } else if (msg.type === "EXTRADATA" && content.kind === "subagent") {
+          log.push({
+            kind: "subagent-end", status: content.status,
+            elapsedMs: content.elapsedMs, result: content.resultPreview
+          });
+        }
+        continue;
+      }
       if (msg.type === "USER") {
         blocks.push({ kind: "user", content: content.content || "", traceId: msg.traceId });
       } else if (msg.type === "ASSISTANT") {
@@ -691,6 +759,12 @@
         }
         delete toolStart[msg.traceId];
       }
+    }
+    // 两遍扫描：工具块都建好后再挂子日志，深层子 Agent 也能正确嵌套
+    for (const via of Object.keys(childLogs)) {
+      const parent = toolsById[via];
+      if (!parent) continue;
+      parent.children = (parent.children || []).concat(childLogs[via]);
     }
     appendChangeBlocks(blocks, changeSummary);
     return blocks;
@@ -791,6 +865,35 @@
   const forkIcon = '<svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="4" r="2"/><circle cx="5" cy="16" r="2"/><circle cx="15" cy="8" r="2"/><path d="M5 6v8"/><path d="M15 10a4 4 0 0 1-4 4H5"/></svg>';
   const resetIcon = '<svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 5.5 3 9l3.5 3.5"/><path d="M3 9h7.5a4.5 4.5 0 0 1 0 9H8"/></svg>';
 
+  /**
+   * 子 Agent 运行过程：按时间顺序展示文本、思考、工具调用与终态。
+   * 只读展示，不参与折叠交互，避免嵌套卡片层级过深。
+   */
+  function renderChildLog(items) {
+    let html = "";
+    for (const item of items || []) {
+      if (item.kind === "text") {
+        html += '<div class="subagent-text">' + window.Markdown.render(item.content || "") + "</div>";
+      } else if (item.kind === "reasoning") {
+        html += '<div class="subagent-reasoning">' + esc(item.content || "") + "</div>";
+      } else if (item.kind === "tool") {
+        const done = item.result != null;
+        html += '<div class="subagent-tool">' +
+          '<span class="subagent-tool-name">' + esc(item.name || "tool") + "</span>" +
+          '<span class="tool-status ' + (done ? "done" : "running") + '">' +
+          (done ? "已完成" : "执行中") + "</span>" +
+          (done && item.result ? "<pre>" + esc(item.result) + "</pre>" : "") +
+          "</div>";
+      } else if (item.kind === "subagent-end") {
+        const elapsed = item.elapsedMs == null
+          ? ""
+          : " · " + (item.elapsedMs >= 1000 ? (item.elapsedMs / 1000).toFixed(1) + "s" : item.elapsedMs + "ms");
+        html += '<div class="subagent-end">子Agent ' + esc(item.status || "结束") + elapsed + "</div>";
+      }
+    }
+    return html;
+  }
+
   function renderBlock(block) {
     const el = document.createElement("div");
     if (block.kind === "user") {
@@ -821,7 +924,7 @@
         '<div class="reasoning-content"></div>';
       el.querySelector(".reasoning-content").textContent = block.content;
     } else if (block.kind === "tool") {
-      el.className = "tool-card" + (block.open ? " open" : "");
+      el.className = "tool-card" + (block.open ? " open" : "") + (block.depth ? " subagent" : "");
       const status = block.result == null ? '<span class="tool-status running">执行中</span>' : '<span class="tool-status done">已完成</span>';
       let detail = "";
       if (block.arguments) {
@@ -829,6 +932,10 @@
       }
       if (block.result != null) {
         detail += '<div class="tool-section"><div class="tool-label">返回</div><pre>' + esc(block.result) + "</pre></div>";
+      }
+      if (block.children && block.children.length) {
+        detail += '<div class="tool-section subagent-log"><div class="tool-label">子Agent运行过程</div>' +
+          renderChildLog(block.children) + "</div>";
       }
       el.innerHTML =
         '<div class="tool-head"><span class="tool-icon">' + toolIcon + '</span>' +
@@ -973,6 +1080,28 @@
   }
 
   function handleEvent(view, name, data) {
+    // 子 Agent 的实时事件带 viaToolCallId，挂到派发它的工具卡片下，不进入主线
+    if (data && data.viaToolCallId) {
+      handleChildEvent(view, name, data);
+      return;
+    }
+    if (name === "error") {
+      const message = (data && data.message) || "请求被拒绝";
+      if (data && data.code === "TRACE_BUSY") {
+        // 后端在准入阶段就拒绝了，没有写入用户消息，这里撤回本地乐观渲染的气泡
+        for (let i = view.blocks.length - 1; i >= 0; i--) {
+          if (view.blocks[i].kind === "user") {
+            view.blocks.splice(i, 1);
+            break;
+          }
+        }
+        view.busyRejected = true;
+        renderChat();
+      }
+      toast(message, true);
+      pushBlock(view, { kind: "other", data: "出错：" + message });
+      return;
+    }
     if (name === "delta") {
       let block = view.blocks[view.blocks.length - 1];
       if (!block || block.kind !== "text") {
@@ -1056,6 +1185,56 @@
     }
   }
 
+  /**
+   * 子 Agent 实时事件：按 viaToolCallId 找到派发卡片，把文本、思考与工具调用追加到其子日志。
+   * 父卡片每次追加后重渲染，展开状态由 block.open 保持。
+   */
+  function handleChildEvent(view, name, data) {
+    const via = data.viaToolCallId;
+    let parent = null;
+    for (const block of view.blocks) {
+      if (block.kind === "tool" && block.id === via) {
+        parent = block;
+        break;
+      }
+    }
+    if (!parent) return;
+    parent.children = parent.children || [];
+    const log = parent.children;
+    if (name === "delta") {
+      let block = log[log.length - 1];
+      if (!block || block.kind !== "text") {
+        block = { kind: "text", content: "", depth: 1 };
+        log.push(block);
+      }
+      block.content += data.content || "";
+    } else if (name === "reasoning") {
+      let block = log[log.length - 1];
+      if (!block || block.kind !== "reasoning") {
+        block = { kind: "reasoning", content: "", depth: 1 };
+        log.push(block);
+      }
+      block.content += data.content || "";
+    } else if (name === "tool_call") {
+      const call = data.call || {};
+      log.push({
+        kind: "tool", id: call.id, name: call.name, arguments: call.arguments,
+        result: null, depth: 1
+      });
+    } else if (name === "tool_result") {
+      for (let i = log.length - 1; i >= 0; i--) {
+        if (log[i].kind === "tool" && log[i].id === data.toolCallId) {
+          log[i].result = data.content || "";
+          break;
+        }
+      }
+    } else {
+      // message_end / trace_data 等对子日志没有额外信息
+      return;
+    }
+    swapBlock(view, parent);
+  }
+
   /** 运行状态记在会话视图上，界面只反映当前会话 */
   function markRunning(view, running) {
     view.running = running;
@@ -1092,7 +1271,7 @@
     const payload = {
       sessionId: sessionId,
       userquery: query,
-      agentName: AGENT_NAME,
+      agentName: state.agent,
       approval: state.approval || "no"
     };
     if (state.workspace) payload.workspace = state.workspace;
@@ -1122,7 +1301,8 @@
       // 停止时 SSE 已断开，收尾提交是异步的，这里轮询几次把本轮变更气泡补上
       if (aborted) await pollChangesAfterStop(view, sessionId);
       // 提醒钩子：正常结束与出错分别响一次，用户主动终止不打扰
-      if (!aborted) remind(failed ? "error" : "done");
+      if (!aborted && !view.busyRejected) remind(failed ? "error" : "done");
+      view.busyRejected = false;
       // 后端会在第一条消息后自动命名会话，结束后刷新列表拿到新名称
       loadSessions();
     }
@@ -1254,16 +1434,16 @@
         }
         decision[group.dataset.sheet] = checked.value;
       }
-      decide(item.toolCallId, decision, card);
+      decide(item.key || item.toolCallId, decision, card);
     });
     return card;
   }
 
-  async function decide(toolCallId, decision, card) {
+  async function decide(key, decision, card) {
     const submit = card && card.querySelector(".hitl-submit");
     if (submit) submit.disabled = true;
     try {
-      await Api.hitlDecide(toolCallId, decision);
+      await Api.hitlDecide(key, decision);
       toast("已提交审批");
     } catch (e) {
       toast(e.message, true);
@@ -1331,7 +1511,7 @@
         if (state.tab === "model") state.modelConfigs = await Api.listModelConfigs();
         else state.compactConfigs = await Api.listCompactConfigs();
       } else if (state.panel.view === "prompt") {
-        state.prompts = await Api.listPrompts(AGENT_NAME);
+        state.prompts = await Api.listPrompts(state.agent);
       } else if (state.panel.view === "skills") {
         const tree = await Api.skillTree(state.skillPath);
         state.skillPath = tree.path || "";
@@ -1538,7 +1718,7 @@
   function renderPrompts() {
     const body = $("panelBody");
     const prompts = state.prompts || [];
-    const help = "保存在 systemprompt 目录，按顺序拼接后作为模型的首条 system 消息。当前 agent：" + AGENT_NAME;
+    const help = "保存在 systemprompt 目录，按顺序拼接后作为模型的首条 system 消息。当前 agent：" + state.agent;
     let html =
       '<div class="cfg-note">系统提示词以「agent名称-提示词名称-顺序.md」<span class="help-tip" title="' + esc(help) + '">?</span></div>' +
       '<div class="cfg-toolbar"><span class="cfg-note" style="margin:0">共 ' + prompts.length + " 个提示词</span>" +
@@ -1565,7 +1745,7 @@
         e.stopPropagation();
         if (!confirm("删除提示词「" + prompt.name + "」？")) return;
         try {
-          await Api.deletePrompt(AGENT_NAME, prompt.name, prompt.order);
+          await Api.deletePrompt(state.agent, prompt.name, prompt.order);
           if (state.promptEditing === key) state.promptEditing = null;
           toast("已删除");
           await loadPanel();
@@ -1627,7 +1807,7 @@
         return;
       }
       try {
-        await Api.savePrompt(AGENT_NAME, name, order, $("p-content").value);
+        await Api.savePrompt(state.agent, name, order, $("p-content").value);
         toast("已保存「" + name + "」");
         state.promptEditing = name + "-" + order;
         await loadPanel();
@@ -2255,6 +2435,17 @@
   $("promptNavBtn").addEventListener("click", () => openPanel("prompt"));
   $("skillsNavBtn").addEventListener("click", () => openPanel("skills"));
   $("workspaceBtn").addEventListener("click", openWorkspacePicker);
+  $("agentBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    renderAgent();
+    $("agentMenu").classList.toggle("hidden");
+  });
+  $("agentMenu").addEventListener("click", (e) => {
+    const option = e.target.closest(".perm-option");
+    if (!option || option.disabled) return;
+    $("agentMenu").classList.add("hidden");
+    selectAgent(option.dataset.agent);
+  });
   $("approvalBtn").addEventListener("click", (e) => {
     e.stopPropagation();
     renderApproval();
@@ -2269,6 +2460,9 @@
   document.addEventListener("click", (e) => {
     if (!e.target.closest("#approvalBtn") && !e.target.closest("#permMenu")) {
       $("permMenu").classList.add("hidden");
+    }
+    if (!e.target.closest("#agentBtn") && !e.target.closest("#agentMenu")) {
+      $("agentMenu").classList.add("hidden");
     }
   });
   $("wsClose").addEventListener("click", closeWorkspacePicker);
@@ -2337,11 +2531,13 @@
     if (e.key === "Escape") {
       closePanel();
       $("permMenu").classList.add("hidden");
+      $("agentMenu").classList.add("hidden");
     }
   });
 
   applyTheme(localStorage.getItem("wayfarer-theme") || "light");
   initLayout();
+  renderAgent();
   renderWorkspace();
   loadSessions();
   refreshModelBadge();

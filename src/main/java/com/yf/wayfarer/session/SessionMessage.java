@@ -1,5 +1,6 @@
 package com.yf.wayfarer.session;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.yf.wayfarer.model.ChatMessage;
 import com.yf.wayfarer.toolcall.ToolCallInfo;
 
@@ -12,12 +13,21 @@ import java.util.Map;
  * 会话文件中的一行消息。
  *
  * @author yyf
- * @description 保存消息 id、所属 trace id、消息类型与 JSON 内容，并提供与 ChatMessage 的互转
+ * @description 保存消息 id、所属 trace id、消息类型、JSON 内容与来源归属，并提供与 ChatMessage 的互转
  */
-public record SessionMessage(String messageId, String traceId, JSONMsgType type, Map<String, Object> content) {
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public record SessionMessage(String messageId, String traceId, JSONMsgType type,
+                             Map<String, Object> content, MessageOrigin origin) {
 
     public SessionMessage {
         content = content == null ? Map.of() : content;
+    }
+
+    /**
+     * 无归属的消息（root Agent 产生）。
+     */
+    public SessionMessage(String messageId, String traceId, JSONMsgType type, Map<String, Object> content) {
+        this(messageId, traceId, type, content, null);
     }
 
     /**

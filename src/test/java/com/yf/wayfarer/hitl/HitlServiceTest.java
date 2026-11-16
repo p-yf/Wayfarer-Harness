@@ -55,8 +55,8 @@ class HitlServiceTest {
         Thread worker = awaitInThread(service, context, decision);
         awaitPending(service, 1);
 
-        assertNotNull(context.get(HitlService.key("call_1")), "应写入 HITL+toolCallId 键");
-        assertTrue(context.get(HitlService.key("call_1")) instanceof Mono);
+        assertNotNull(context.get(HitlService.key("root", "call_1")), "应写入 HITL+agentId/toolCallId 键");
+        assertTrue(context.get(HitlService.key("root", "call_1")) instanceof Mono);
 
         service.complete("call_1", Map.of());
         join(worker);
@@ -75,7 +75,7 @@ class HitlServiceTest {
         Thread worker2 = awaitInThread(service, second, secondDecision);
         awaitPending(service, 2);
 
-        assertNotEquals(first.get(HitlService.key("call_1")), second.get(HitlService.key("call_2")));
+        assertNotEquals(first.get(HitlService.key("root", "call_1")), second.get(HitlService.key("root", "call_2")));
 
         assertTrue(service.complete("call_1", Map.of("approved", true)));
         List<HitlService.Pending> left = service.pending(null);

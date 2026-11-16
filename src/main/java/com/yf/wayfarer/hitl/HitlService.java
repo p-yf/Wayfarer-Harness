@@ -26,9 +26,10 @@ public final class HitlService {
      *
      * @author yyf
      * @description 供前端渲染审批卡片所需的上下文；metadata 决定卡片的选项与样式，
-     * 形如 {"sheet1": {"key1": "允许", "key2": "拒绝", "style": "radio group"}}
+     * 形如 {"sheet1": {"key1": "允许", "key2": "拒绝", "style": "radio group"}}。
+     * key 是「agentId/toolCallId」复合键，父子 Agent 的 call_0 因此互不干扰
      */
-    public record Pending(String toolCallId, String agentName, String sessionId,
+    public record Pending(String key, String agentId, String toolCallId, String agentName, String sessionId,
                           String toolName, String arguments, Map<String, Object> metadata,
                           Instant createdAt) {
     }
@@ -95,15 +96,25 @@ public final class HitlService {
     }
 
     /**
-     * 按工具调用 id 写入决定，整个请求体作为决定交给工具。
+     * 按复合键写入决定，整个请求体作为决定交给工具。
      *
      * @return 是否存在等待项并被写入
      */
-    public boolean complete(String toolCallId, Map<String, Object> payload) {
-        requireText(toolCallId, "toolCallId");
-        Sinks.One<Map<String, Object>> sink = waiting.get(toolCallId);
+    public boolean complete(String key, Map<String, Object> payload) {
+        requireText(key, "key");
+        Sinks.One<Map<String, Object>> sink = waiting.get(key);
         if (sink == null) {
-            return false;
+            // 兼容只传 toolCallId 的旧调用：唯一命中时才接受
+            String suffix = "/" + key;
+            String matched = waiting.keySet().stream()
+                    .filter(candidate -> candidate.endsWith(suffix))
+                    .findFirst()
+                    .orElse(null);
+            if (matched == null) {
+                return false;
+            }
+            key = matched;
+            sink = waiting.get(key);
         }
         return sink.tryEmitValue(payload == null ? Map.of() : payload).isSuccess();
     }
@@ -120,29 +131,31 @@ public final class HitlService {
     }
 
     /**
-     * 上下文中的确认键，约定为 HITL+toolCallId。
+     * 上下文中的确认键，约定为 HITL+agentId/toolCallId，避免父子 Agent 的 call_0 冲突。
      */
-    public static String key(String toolCallId) {
-        return "HITL" + toolCallId;
+    public static String key(String agentId, String toolCallId) {
+        return "HITL" + (agentId == null || agentId.isBlank() ? "root" : agentId) + "/" + toolCallId;
     }
 
     private Mono<Map<String, Object>> wait(String agentName, AgentContext context, String toolCallId,
                                            String toolName, String arguments, Map<String, Object> metadata) {
+        String agentId = context.agentId() == null ? "root" : context.agentId();
+        String key = agentId + "/" + toolCallId;
         Sinks.One<Map<String, Object>> sink = Sinks.one();
-        if (waiting.putIfAbsent(toolCallId, sink) != null) {
-            throw new IllegalStateException("重复的工具调用 id：" + toolCallId);
+        if (waiting.putIfAbsent(key, sink) != null) {
+            throw new IllegalStateException("重复的工具调用 id：" + key);
         }
-        pendings.put(toolCallId, new Pending(toolCallId, agentName, context.sessionId(),
+        pendings.put(key, new Pending(key, agentId, toolCallId, agentName, context.sessionId(),
                 toolName, arguments, metadata, Instant.now()));
-        context.put(key(toolCallId), sink.asMono());
+        context.put(key(agentId, toolCallId), sink.asMono());
         // agent 被终止时让等待立即结束，释放被工具占用的线程
         context.onCancel(() -> sink.tryEmitError(new CancellationException("agent 已终止")));
 
         return sink.asMono()
                 .timeout(Duration.ofSeconds(timeoutSeconds))
                 .doFinally(signal -> {
-                    waiting.remove(toolCallId);
-                    pendings.remove(toolCallId);
+                    waiting.remove(key);
+                    pendings.remove(key);
                 });
     }
 

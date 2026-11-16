@@ -60,10 +60,21 @@ public interface Session {
      * 向指定会话追加无消息 id 的消息，由实现补齐。
      */
     default void append(String sessionId, JSONMsgType type, String traceId, Map<String, Object> content) {
+        append(sessionId, type, traceId, content, null);
+    }
+
+    /**
+     * 追加一条带归属的消息；origin 为 null 表示 root Agent 产生。
+     */
+    default void append(String sessionId, JSONMsgType type, String traceId,
+                        Map<String, Object> content, MessageOrigin origin) {
         Map<String, Object> message = new LinkedHashMap<>();
         message.put("traceId", traceId);
         message.put("type", type.name());
         message.put("content", content);
+        if (origin != null) {
+            message.put("origin", origin.toMap());
+        }
         append(sessionId, message);
     }
 
@@ -103,8 +114,11 @@ public interface Session {
         Map<String, List<SessionMessage>> grouped = new LinkedHashMap<>();
         for (SessionMessage message : messages(sessionId)) {
             if (message.traceId() == null
+                    // 子 Agent 的消息不参与 root 的轮次划分，否则会把一轮拆成多轮
+                    || message.origin() != null
                     || message.type() == JSONMsgType.COMPACT
-                    || message.type() == JSONMsgType.CUSTOM) {
+                    || message.type() == JSONMsgType.CUSTOM
+                    || message.type() == JSONMsgType.TRACE_END) {
                 continue;
             }
             grouped.computeIfAbsent(message.traceId(), key -> new ArrayList<>()).add(message);
@@ -153,9 +167,11 @@ public interface Session {
         }
         for (int i = compactIndex + 1; i < all.size(); i++) {
             SessionMessage message = all.get(i);
-            if (message.type() == JSONMsgType.USER
+            // 只有 root 的对话消息进入模型历史：子 Agent 的过程不污染父上下文
+            if (message.origin() == null
+                    && (message.type() == JSONMsgType.USER
                     || message.type() == JSONMsgType.ASSISTANT
-                    || message.type() == JSONMsgType.TOOL) {
+                    || message.type() == JSONMsgType.TOOL)) {
                 history.add(SessionMessage.toChatMessage(message.content()));
             }
         }

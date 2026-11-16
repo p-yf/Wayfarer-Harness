@@ -233,12 +233,13 @@ class AgentWebTest {
         assertFalse(String.join("", events).contains("\"chunk\""), "不应再推送内部消息外壳：" + events);
 
         List<SessionMessage> stored = session.messages(sessionId);
-        assertEquals(4, stored.size());
+        assertEquals(5, stored.size(), "实际消息：" + stored);
         assertEquals("turn-web", stored.get(0).traceId());
         assertEquals(JSONMsgType.ASSISTANT, stored.get(1).type());
         assertEquals("turn-web", stored.get(1).traceId(), "助手消息应沿用调用方指定的 trace id");
         assertEquals(JSONMsgType.EXTRADATA, stored.get(2).type());
         assertEquals("cursor-9", stored.get(3).content().get("store:cursor"));
+        assertEquals(JSONMsgType.TRACE_END, stored.get(4).type(), "TRACE_END 应是本轮最后一条写入");
     }
 
     @Test
@@ -328,6 +329,48 @@ class AgentWebTest {
         assertTrue(request.contains("第二条提示词"), "请求应包含第二条提示词：" + request);
         assertTrue(request.indexOf("第一条提示词") < request.indexOf("第二条提示词"),
                 "提示词应按顺序拼接：" + request);
+    }
+
+    @Test
+    void 专业版Agent同时携带基础工具与两个独立子Agent工具() {
+        String sessionId = session.create("专业版工具");
+        session.append(sessionId, JSONMsgType.USER, "turn-pro", userContent("规划一下"));
+
+        client.post().uri("/api/agent/stream")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("sessionId", sessionId, "agentName", "wayfarerpro"))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(String.class)
+                .returnResult();
+
+        String request = MODEL_REQUEST.get();
+        // 专业版必须继承基础版的全部能力
+        assertTrue(request.contains("\"bash\""), "专业版应保留编码工具：" + request);
+        assertTrue(request.contains("\"read\""), "专业版应保留读取工具：" + request);
+        assertTrue(request.contains("\"plan\""), "专业版应保留计划工具：" + request);
+        // 派发与取结果必须是两个互相独立的工具
+        assertTrue(request.contains("\"subagent\""), "专业版应提供派发工具：" + request);
+        assertTrue(request.contains("\"subagent_result\""), "专业版应提供取结果工具：" + request);
+    }
+
+    @Test
+    void 基础版Agent不携带子Agent工具() {
+        String sessionId = session.create("基础版工具");
+        session.append(sessionId, JSONMsgType.USER, "turn-base", userContent("规划一下"));
+
+        client.post().uri("/api/agent/stream")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("sessionId", sessionId, "agentName", "wayfarer"))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(String.class)
+                .returnResult();
+
+        String request = MODEL_REQUEST.get();
+        assertTrue(request.contains("\"bash\""), "基础版应携带编码工具：" + request);
+        assertFalse(request.contains("\"subagent\""), "基础版不应携带派发工具：" + request);
+        assertFalse(request.contains("\"subagent_result\""), "基础版不应携带取结果工具：" + request);
     }
 
     @Test

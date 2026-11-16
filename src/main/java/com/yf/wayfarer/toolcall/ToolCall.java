@@ -123,7 +123,10 @@ public final class ToolCall {
                 schema.put("description", toolParam.description());
             }
             properties.put(parameter.getName(), schema);
-            required.add(parameter.getName());
+            // 只有显式标记非必填的参数才从 required 中省略
+            if (toolParam == null || toolParam.required()) {
+                required.add(parameter.getName());
+            }
         }
 
         Map<String, Object> parameters = new LinkedHashMap<>();

@@ -49,13 +49,11 @@ public class UserQueryPersistHandler implements ChainHandler {
             return;
         }
         ChatMessage user = new ChatMessage(ChatMessage.Role.USER, query);
-        boolean firstUserMessage = context.messages().stream()
-                .noneMatch(message -> message.role() == ChatMessage.Role.USER);
         context.messages().add(user);
-        session.append(sessionId, JSONMsgType.USER, traceId, SessionMessage.toMap(user));
+        session.append(sessionId, JSONMsgType.USER, traceId, SessionMessage.toMap(user), context.origin());
 
-        // 会话还没定名时用第一条用户消息命名，前端列表直接展示后端名称
-        if (firstUserMessage && Session.DEFAULT_NAME.equals(session.meta(sessionId).name())) {
+        // 会话还没定名时用第一条 root 用户消息命名；子 Agent 的初始任务不参与命名
+        if (context.origin() == null && Session.DEFAULT_NAME.equals(session.meta(sessionId).name())) {
             session.rename(sessionId, titleOf(query));
         }
     }

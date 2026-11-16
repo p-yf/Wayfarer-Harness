@@ -73,6 +73,15 @@
         <div class="composer" id="composer">
           <textarea id="input" rows="2" placeholder="Enter 发送，Shift+Enter 换行"></textarea>
           <div class="composer-bar">
+            <button class="ws-btn agent-btn" id="agentBtn" title="选择 Agent">
+              <img class="agent-mark" src="/favicon.svg" alt="">
+              <span class="ws-name" id="agentName">wayfarer</span>
+            </button>
+            <div class="perm-menu agent-menu hidden" id="agentMenu">
+              <div class="perm-tip">选择 Agent</div>
+              <button class="perm-option" data-agent="wayfarer">wayfarer<small>标准能力</small></button>
+              <button class="perm-option" data-agent="wayfarerpro">wayfarerpro<small>标准能力 + 子 Agent 派发</small></button>
+            </div>
             <button class="ws-btn" id="workspaceBtn" title="选择工作区">
               <svg viewBox="0 0 16 16" width="14" height="14"><path d="M1.8 4.2a1 1 0 0 1 1-1h3l1.3 1.4h5.1a1 1 0 0 1 1 1v6.2a1 1 0 0 1-1 1H2.8a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>
               <span class="ws-name" id="workspaceName">工作区选择</span>

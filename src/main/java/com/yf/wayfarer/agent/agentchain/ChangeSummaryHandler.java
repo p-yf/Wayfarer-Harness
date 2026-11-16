@@ -24,11 +24,11 @@ public final class ChangeSummaryHandler implements ChainHandler {
     }
 
     /**
-     * 位于最外层：前置逻辑在整轮运行之前执行，后置逻辑在主循环之后执行。
+     * 位于运行级链内层：变更汇总必须早于 TRACE_END，否则 END 不再是该 trace 的最后一条写入。
      */
     @Override
     public int sort() {
-        return Integer.MIN_VALUE;
+        return 30;
     }
 
     @Override

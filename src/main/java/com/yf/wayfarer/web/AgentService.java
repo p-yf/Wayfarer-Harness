@@ -1,29 +1,16 @@
 package com.yf.wayfarer.web;
 
 import com.yf.wayfarer.agent.Agent;
-import com.yf.wayfarer.loop.AssistantAndToolCallPersistHandler;
-import com.yf.wayfarer.loop.modelchain.MemoryCompactConfig;
-import com.yf.wayfarer.loop.modelchain.MemoryCompressHandler;
-import com.yf.wayfarer.loop.modelchain.MemoryManageHandler;
-import com.yf.wayfarer.loop.modelchain.ModelHandler;
-import com.yf.wayfarer.loop.modelchain.PlanReminderHandler;
-import com.yf.wayfarer.loop.modelchain.SkillsHandler;
-import com.yf.wayfarer.loop.modelchain.ToolResultRepairHandler;
-import com.yf.wayfarer.loop.modelchain.TraceRecordHandler;
-import com.yf.wayfarer.loop.modelchain.UserQueryPersistHandler;
-import com.yf.wayfarer.loop.toolchain.CodingToolApprovalHandler;
-import com.yf.wayfarer.loop.toolchain.ToolCallHandler;
-import com.yf.wayfarer.loop.toolchain.ToolCallLoopHandler;
-import com.yf.wayfarer.loop.toolchain.ToolCircleCheckHandler;
+import com.yf.wayfarer.agent.AgentBlueprint;
+import com.yf.wayfarer.agent.AgentCatalog;
+import com.yf.wayfarer.agent.AgentDependencies;
+import com.yf.wayfarer.agent.WayfarerBlueprint;
+import com.yf.wayfarer.agent.WayfarerProBlueprint;
 import com.yf.wayfarer.change.ChangeRecorder;
-import com.yf.wayfarer.agent.agentchain.ChangeSummaryHandler;
-import com.yf.wayfarer.loop.LoopChain;
-import com.yf.wayfarer.tools.CodingTools;
-import com.yf.wayfarer.tools.PlanTools;
-import com.yf.wayfarer.tools.UnloadTools;
 import com.yf.wayfarer.config.ConfigStore;
 import com.yf.wayfarer.hitl.HitlService;
 import com.yf.wayfarer.loop.AgentContext;
+import com.yf.wayfarer.loop.modelchain.MemoryCompactConfig;
 import com.yf.wayfarer.message.AgentMessage;
 import com.yf.wayfarer.model.ModelConfig;
 import com.yf.wayfarer.model.openai.OpenAIChatModel;
@@ -31,8 +18,8 @@ import com.yf.wayfarer.prompt.SystemPromptStore;
 import com.yf.wayfarer.session.Session;
 import com.yf.wayfarer.session.UnloadedMessageStore;
 import com.yf.wayfarer.skill.SkillStore;
-import com.yf.wayfarer.toolcall.ToolCall;
-import com.yf.wayfarer.toolcall.ToolDefinition;
+import com.yf.wayfarer.subagent.SubAgentManager;
+import com.yf.wayfarer.trace.TraceStatus;
 import org.reactivestreams.Subscription;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,7 +36,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * agent 运行服务。
  *
  * @author yyf
- * @description 每次运行都先读取模型配置与记忆压缩配置，把请求参数装配成上下文后交给 agent 流式运行，
+ * @description 每次运行都先读取模型配置与记忆压缩配置，按请求中的 agentName 选择蓝图装配链路后流式运行，
  * 并按会话 id 维护运行中的订阅以支持中途终止
  */
 @Service
@@ -65,6 +52,9 @@ public class AgentService {
     private final HitlService hitlService;
     private final SkillStore skillStore;
     private final ChangeRecorder changeRecorder;
+    private final TraceStatus traceStatus;
+    private final SubAgentManager subAgentManager;
+    private final AgentCatalog agentCatalog;
     private final String rootWorkspace;
     private final String apiKey;
     private final String baseUrl;
@@ -73,6 +63,9 @@ public class AgentService {
     private final Long maxTokens;
     private final Integer maxTurns;
     private final String defaultAgentName;
+    private final int maxDepth;
+    private final long subAgentTimeoutSeconds;
+    private final long finishWaitSeconds;
     private final ConcurrentHashMap<String, Subscription> running = new ConcurrentHashMap<>();
 
     private volatile OpenAIChatModel chatModel;
@@ -86,6 +79,8 @@ public class AgentService {
                         HitlService hitlService,
                         SkillStore skillStore,
                         ChangeRecorder changeRecorder,
+                        TraceStatus traceStatus,
+                        SubAgentManager subAgentManager,
                         @Value("${wayfarer.root-workspace:./}") String rootWorkspace,
                         @Value("${wayfarer.model.api-key:}") String apiKey,
                         @Value("${wayfarer.model.base-url:https://api.deepseek.com}") String baseUrl,
@@ -93,7 +88,10 @@ public class AgentService {
                         @Value("${wayfarer.model.temperature:#{null}}") Double temperature,
                         @Value("${wayfarer.model.max-tokens:#{null}}") Long maxTokens,
                         @Value("${wayfarer.agent.max-turns:#{null}}") Integer maxTurns,
-                        @Value("${wayfarer.agent.name:wayfarer}") String defaultAgentName) {
+                        @Value("${wayfarer.agent.name:wayfarer}") String defaultAgentName,
+                        @Value("${wayfarer.subagent.max-depth:2}") int maxDepth,
+                        @Value("${wayfarer.subagent.task-timeout-seconds:600}") long subAgentTimeoutSeconds,
+                        @Value("${wayfarer.subagent.finish-wait-seconds:10}") long finishWaitSeconds) {
         this.session = session;
         this.unloadedStore = unloadedStore;
         this.promptStore = promptStore;
@@ -102,6 +100,9 @@ public class AgentService {
         this.hitlService = hitlService;
         this.skillStore = skillStore;
         this.changeRecorder = changeRecorder;
+        this.traceStatus = traceStatus;
+        this.subAgentManager = subAgentManager;
+        this.agentCatalog = new AgentCatalog(List.of(new WayfarerBlueprint(), new WayfarerProBlueprint()));
         this.rootWorkspace = Path.of(rootWorkspace).toAbsolutePath().normalize().toString();
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
@@ -110,6 +111,9 @@ public class AgentService {
         this.maxTokens = maxTokens;
         this.maxTurns = maxTurns;
         this.defaultAgentName = defaultAgentName;
+        this.maxDepth = maxDepth;
+        this.subAgentTimeoutSeconds = subAgentTimeoutSeconds;
+        this.finishWaitSeconds = finishWaitSeconds;
     }
 
     /**
@@ -124,6 +128,10 @@ public class AgentService {
         if (agentName == null) {
             agentName = defaultAgentName;
         }
+        if (!agentCatalog.supports(agentName)) {
+            throw new IllegalArgumentException("未知 agent：" + agentName);
+        }
+        AgentBlueprint blueprint = agentCatalog.find(agentName);
 
         AgentContext context = new AgentContext();
         payload.forEach((key, value) -> {
@@ -132,30 +140,30 @@ public class AgentService {
             }
         });
         context.put(AgentContext.SESSION_ID, sessionId);
-        context.put(AgentContext.AGENT_NAME, agentName);
+        context.put(AgentContext.AGENT_NAME, blueprint.name());
 
         // 运行前把系统提示词按「名称-顺序」放入状态，由模型处理器拼接后作为首条 system 消息
-        Map<String, String> prompts = promptStore.loadMap(agentName);
+        Map<String, String> prompts = promptStore.loadMap(blueprint.name());
         if (!prompts.isEmpty()) {
             context.put(AgentContext.SYSTEM_PROMPT, prompts);
         }
         context.put(AgentContext.ROOT_WORKSPACE, rootWorkspace);
 
         log.info("运行开始 sessionId={} agentName={} workspace={} 提示词条数={}",
-                sessionId, agentName, text(payload.get(AgentContext.WORKSPACE)), prompts.size());
+                sessionId, blueprint.name(), text(payload.get(AgentContext.WORKSPACE)), prompts.size());
 
-        return buildAgent().stream(context)
+        return buildAgent(blueprint).stream(context)
                 .doOnSubscribe(subscription -> running.put(sessionId, subscription))
                 .doFinally(signal -> {
                     running.remove(sessionId);
-                    log.info("运行结束 sessionId={} 信号={}", sessionId, signal);
+                    log.info("运行结束 sessionId={} agentName={} 信号={}", sessionId, blueprint.name(), signal);
                 });
     }
 
     /**
      * 终止指定会话正在运行的任务，返回是否确有任务被终止。
      *
-     * <p>取消是协作式的：接口只发出终止请求，主循环收尾（提交本轮变更、落盘状态）
+     * <p>取消是协作式的：接口只发出终止请求，主循环收尾（子 Agent 收敛、提交本轮变更、落盘状态）
      * 由运行线程自行完成；页面侧通过轮询变更接口来获取收尾结果。</p>
      */
     public boolean cancel(String sessionId) {
@@ -168,36 +176,20 @@ public class AgentService {
     }
 
     public boolean isRunning(String sessionId) {
-        return running.containsKey(sessionId);
+        return running.containsKey(sessionId) || traceStatus.isRunning(sessionId);
     }
 
     /**
      * 每次构建都重新读取配置：优先使用启用的配置文件，没有时回退到 yml 中的取值。
      */
-    private Agent buildAgent() {
-        ToolCall toolCall = new ToolCall();
-        List<ToolDefinition> tools = toolCall.parse(new UnloadTools(unloadedStore), new PlanTools(),
-                new CodingTools());
-        OpenAIChatModel model = chatModel(modelConfig());
-
-        // 模型链：用户请求入历史 → 计划提醒 → 记忆压缩 → 技能清单 → 补齐工具结果 → 调用记录 → 步骤持久化 → 模型调用 → 记忆回写
-        LoopChain modelChain = LoopChain.of(
-                new UserQueryPersistHandler(),
-                new PlanReminderHandler(),
-                new MemoryCompressHandler(model, unloadedStore, compactConfig()),
-                new SkillsHandler(skillStore),
-                new ToolResultRepairHandler(),
-                new TraceRecordHandler(),
-                new AssistantAndToolCallPersistHandler(),
-                new ModelHandler(model, tools),
-                new MemoryManageHandler());
-        // 工具链：步骤持久化 → 批量调度 → 单次调用（重复检查 → 审批 → 执行）
-        LoopChain toolChain = LoopChain.of(new AssistantAndToolCallPersistHandler(),
-                new ToolCallLoopHandler(), new ToolCircleCheckHandler(),
-                new CodingToolApprovalHandler(hitlService), new ToolCallHandler(toolCall));
-        // 运行级链：运行开始记录脏文件基线，收尾提交本轮变更并推送汇总消息
-        LoopChain runChain = LoopChain.of(new ChangeSummaryHandler(changeRecorder));
-        return new Agent(session, modelChain, toolChain, runChain, maxTurns);
+    private Agent buildAgent(AgentBlueprint blueprint) {
+        AgentDependencies deps = new AgentDependencies(session, unloadedStore, promptStore,
+                chatModel(modelConfig()), compactConfig(), hitlService, skillStore, changeRecorder,
+                traceStatus, subAgentManager, maxTurns, maxDepth, subAgentTimeoutSeconds, finishWaitSeconds);
+        // 子 Agent 与父 Agent 共用同一套组件，名称固定派生，深度由子上下文控制
+        deps.subAgentFactory((parent, agentId, viaToolCallId, task, historyExtend, extra) ->
+                blueprint.buildSubAgent(parent, deps, agentId, viaToolCallId, task, historyExtend, extra));
+        return blueprint.build(deps);
     }
 
     private ModelConfig modelConfig() {

@@ -59,7 +59,7 @@ public class TraceRecordHandler implements ChainHandler {
         String sessionId = context.sessionId();
         String traceId = context.traceId();
         if (session != null && sessionId != null) {
-            session.append(sessionId, JSONMsgType.EXTRADATA, traceId, content);
+            session.append(sessionId, JSONMsgType.EXTRADATA, traceId, content, context.origin());
         }
 
         log.info("trace 结束 traceId={} 耗时={}ms finishReason={} usage={}",

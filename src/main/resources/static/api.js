@@ -100,8 +100,9 @@
     listWorkspace: (path) => request("GET", "/api/workspace/list" + (path ? "?path=" + encodeURIComponent(path) : "")),
     hitlPending: () => request("GET", "/api/hitl/pending"),
     // decision 形如 {"sheet1": "key1"}，与待确认项 metadata 的页名、选项键一一对应
-    hitlDecide: (toolCallId, decision) =>
-      request("POST", "/api/hitl", Object.assign({ toolCallId }, decision)),
+    // key 是「agentId/toolCallId」复合键，父子 Agent 的同名工具调用互不冲突
+    hitlDecide: (key, decision) =>
+      request("POST", "/api/hitl", Object.assign({ key }, decision)),
     listModelConfigs: () => request("GET", "/api/model-configs"),
     saveModelConfig: (name, config) => request("PUT", "/api/model-configs/" + encodeURIComponent(name), config),
     deleteModelConfig: (name) => request("DELETE", "/api/model-configs/" + encodeURIComponent(name)),

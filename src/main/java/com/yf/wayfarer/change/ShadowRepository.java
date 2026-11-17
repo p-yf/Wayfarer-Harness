@@ -31,6 +31,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -40,6 +41,7 @@ import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 /**
  * 单个工作区对应的影子 git 仓库。
@@ -329,6 +331,9 @@ public final class ShadowRepository {
      * 也按「撤销优先」处理，不做冲突跳过。覆盖前的旧内容仍留在 shadow 仓库的历史里，
      * 随时可以从 diff 面板看回来。</p>
      *
+     * <p>文件删完后，按提交树判断哪些目录是本轮新建的，把整棵目录删掉：
+     * git 不记录目录，只删文件会在工作区留下空文件夹和未提交残留。</p>
+     *
      * @param commitIds       要撤销的提交，新的在前
      * @param pathFilter      只撤销单个路径，null 表示全部
      * @param summary         回退提交的摘要
@@ -349,16 +354,82 @@ public final class ShadowRepository {
             }
 
             List<String> applied = new ArrayList<>();
+            List<String> removed = new ArrayList<>();
             for (Map.Entry<String, byte[]> entry : desired.entrySet()) {
                 writeWorkTreeFile(entry.getKey(), entry.getValue());
                 applied.add(entry.getKey());
+                if (entry.getValue() == null) {
+                    removed.add(entry.getKey());
+                }
             }
+            // 文件删掉之后，本轮新建的目录会留下空壳或未提交残留，按提交记录一并删除
+            removeCreatedDirectories(commitIds, removed);
 
             String commitId = applied.isEmpty()
                     ? null
                     : commit(new LinkedHashSet<>(applied), summary, trailers);
             return new RevertOutcome(commitId, applied);
         });
+    }
+
+    /**
+     * 按提交记录删除本轮新建的目录。
+     *
+     * <p>git 只记录文件、不记录目录，所以「目录是不是本轮建的」由提交树推断：
+     * 把被删文件逐级父目录拿去和最早一条被撤销提交的父提交（回退基准）比较，
+     * 第一个在基准树里不存在的目录就是本轮新建目录的根，整棵删除；
+     * 基准树里已经存在的目录说明是之前就有的，一律不动。</p>
+     *
+     * <p>按目录整体删除而不是「空了才删」：目录里可能有没进过提交的残留
+     * （例如子 Agent 在轮次收尾后写入的文件），只删记录过的文件会留下空壳和残骸。</p>
+     */
+    private void removeCreatedDirectories(List<String> commitIds, List<String> removedPaths) {
+        if (commitIds.isEmpty() || removedPaths.isEmpty()) {
+            return;
+        }
+        // commitIds 新的在前，最后一条是最早的提交，它的父提交就是回退的基准状态
+        String oldest = commitIds.get(commitIds.size() - 1);
+        try (Git git = newGit(); RevWalk walk = new RevWalk(git.getRepository())) {
+            RevCommit commit = walk.parseCommit(ObjectId.fromString(oldest));
+            RevTree baseTree = commit.getParentCount() == 0
+                    ? null : walk.parseCommit(commit.getParent(0)).getTree();
+            for (String path : removedPaths) {
+                String[] parts = path.split("/");
+                StringBuilder prefix = new StringBuilder();
+                // 逐级检查父目录，找到第一个在基准树里不存在的祖先
+                for (int i = 0; i < parts.length - 1; i++) {
+                    if (i > 0) {
+                        prefix.append('/');
+                    }
+                    prefix.append(parts[i]);
+                    String relative = prefix.toString();
+                    if (baseTree != null && TreeWalk.forPath(git.getRepository(), relative, baseTree) != null) {
+                        continue;
+                    }
+                    Path directory = workTree.resolve(relative);
+                    if (Files.isDirectory(directory)) {
+                        deleteRecursively(directory);
+                        log.info("撤销本轮新建目录 workTree={} path={}", workTree, relative);
+                    }
+                    break;
+                }
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("清理本轮新建目录失败：" + workTree, e);
+        }
+    }
+
+    /**
+     * 递归删除目录，先删子项再删目录本身。
+     */
+    private static void deleteRecursively(Path directory) throws IOException {
+        List<Path> entries;
+        try (Stream<Path> walk = Files.walk(directory)) {
+            entries = walk.sorted(Comparator.reverseOrder()).toList();
+        }
+        for (Path entry : entries) {
+            Files.deleteIfExists(entry);
+        }
     }
 
     /**

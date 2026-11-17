@@ -190,6 +190,45 @@ class LoopTest {
     }
 
     @Test
+    void 等待工作线程真正退出后才返回() throws Exception {
+        CountDownLatch toolStarted = new CountDownLatch(1);
+        CountDownLatch resume = new CountDownLatch(1);
+        AtomicInteger finished = new AtomicInteger();
+
+        LoopChain modelChain = LoopChain.of((ctx, next) ->
+                ctx.put(AgentContext.MODEL_RESPONSE, responseWithToolCall()));
+        LoopChain toolChain = LoopChain.of((ctx, next) -> {
+            toolStarted.countDown();
+            try {
+                resume.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        Loop loop = new Loop(modelChain, toolChain) {
+            @Override
+            protected void execute(AgentContext context, Runnable core) {
+                try {
+                    core.run();
+                } finally {
+                    finished.incrementAndGet();
+                }
+            }
+        };
+
+        Disposable disposable = loop.run(new AgentContext()).subscribe();
+        assertTrue(toolStarted.await(5, TimeUnit.SECONDS));
+        disposable.dispose();
+
+        // 取消只打断阻塞点，当前工具还在跑，此时不能报告线程已退出
+        assertFalse(loop.awaitStopped(1), "工具未收尾前不应判定为已退出");
+
+        resume.countDown();
+        assertTrue(loop.awaitStopped(5), "工具收尾后应等到线程退出");
+        assertEquals(1, finished.get());
+    }
+
+    @Test
     void 运行异常时运行级收尾仍执行() {
         AtomicInteger finished = new AtomicInteger();
         LoopChain modelChain = LoopChain.of((ctx, next) -> {

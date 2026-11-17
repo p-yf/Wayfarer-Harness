@@ -10,6 +10,8 @@ import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -27,6 +29,11 @@ public class Loop {
     private final LoopChain modelChain;
     private final LoopChain toolChain;
     private final Integer maxTurns;
+
+    /**
+     * 本次运行工作线程的退出信号，取消只打断阻塞点，线程还要把当前步骤收完。
+     */
+    private volatile CountDownLatch stopped;
 
     public Loop(LoopChain modelChain, LoopChain toolChain) {
         this(modelChain, toolChain, null);
@@ -52,6 +59,8 @@ public class Loop {
         context.put(AgentContext.AGENT_MSG_SINK, (Consumer<AgentMessage>) output::tryEmitNext);
         AtomicBoolean cancelled = new AtomicBoolean(false);
         Runnable core = () -> loop(context, output, cancelled);
+        CountDownLatch done = new CountDownLatch(1);
+        stopped = done;
 
         return output.asFlux()
                 .doOnSubscribe(subscription -> Mono.fromRunnable(() -> {
@@ -63,6 +72,8 @@ public class Loop {
                     } catch (RuntimeException e) {
                         log.error("运行异常 traceId={}", context.traceId(), e);
                         output.tryEmitError(e);
+                    } finally {
+                        done.countDown();
                     }
                 }).subscribeOn(Schedulers.boundedElastic()).subscribe(ignored -> {
                 }, output::tryEmitError))
@@ -72,6 +83,24 @@ public class Loop {
                     context.put(AgentContext.CANCELLED, true);
                     context.fireCancel();
                 });
+    }
+
+    /**
+     * 等待本次运行的工作线程真正退出（含超时）。
+     * 下游取消只负责打断阻塞点，线程仍可能把当前步骤收完，
+     * 父级在收尾（变更记录、TRACE_END）之前必须等它停下，否则会漏记它写的文件。
+     */
+    public boolean awaitStopped(long timeoutSeconds) {
+        CountDownLatch latch = stopped;
+        if (latch == null) {
+            return true;
+        }
+        try {
+            return latch.await(Math.max(1, timeoutSeconds), TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
 
     /**

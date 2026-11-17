@@ -46,8 +46,8 @@ public final class ChangeService {
         List<Located> matched = new ArrayList<>();
         for (ShadowRepository repository : store.all()) {
             for (ChangeCommit commit : repository.commits()) {
-                // 基线提交是工作区的原始快照，不对应任何一次运行
-                if (ShadowRepository.BASELINE_TOOL.equals(commit.tool())) {
+                // 基线是工作区原始快照，运行前快照只是本轮基线，都不对应一次运行的改动
+                if (hidden(commit.tool())) {
                     continue;
                 }
                 if (!blank(sessionId) && !sessionId.equals(commit.sessionId())) {
@@ -112,7 +112,7 @@ public final class ChangeService {
         List<Located> matched = new ArrayList<>();
         for (ShadowRepository repository : store.all()) {
             for (ChangeCommit commit : repository.commits()) {
-                if (ShadowRepository.BASELINE_TOOL.equals(commit.tool())) {
+                if (hidden(commit.tool())) {
                     continue;
                 }
                 if (!blank(sessionId) && !sessionId.equals(commit.sessionId())) {
@@ -161,7 +161,8 @@ public final class ChangeService {
         for (ShadowRepository repository : store.all()) {
             // commits() 是新的在前，转成从旧到新，边界才好按「提交链顺序」算
             List<ChangeCommit> commits = new ArrayList<>(repository.commits());
-            commits.removeIf(commit -> ShadowRepository.BASELINE_TOOL.equals(commit.tool()));
+            // 快照不能参与回退：它的内容正是用户运行前的改动，撤掉它会把用户的修改一并抹掉
+            commits.removeIf(commit -> hidden(commit.tool()));
             if (commits.isEmpty()) {
                 continue;
             }
@@ -264,6 +265,13 @@ public final class ChangeService {
             files.add(item);
         }
         return files;
+    }
+
+    /**
+     * 不对应一次运行改动的提交：工作区基线、运行前快照。
+     */
+    private static boolean hidden(String tool) {
+        return ShadowRepository.BASELINE_TOOL.equals(tool) || ChangeRecorder.SNAPSHOT_TOOL.equals(tool);
     }
 
     private static boolean blank(String value) {

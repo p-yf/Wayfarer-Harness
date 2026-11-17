@@ -13,8 +13,9 @@ import java.util.Map;
  * 子 Agent 收尾处理器。
  *
  * @author yyf
- * @description 运行级链最内层：主循环结束后等待本轮子 Agent 收敛（有超时），
- * 取消时级联终止；随后把子任务终态写入上下文供 TRACE_END 汇总，并释放会话级统计与未读结果
+ * @description 运行级链最内层：主循环结束后先封闭并取消仍存活的子 Agent（含超时等待线程退出），
+ * 保证本轮变更记录与 TRACE_END 之后不会再有子 Agent 写文件或写消息；
+ * 随后把子任务终态写入上下文供 TRACE_END 汇总，并释放会话级统计与未读结果
  */
 public final class SubAgentSupervisor implements ChainHandler {
 
@@ -54,13 +55,11 @@ public final class SubAgentSupervisor implements ChainHandler {
         if (sessionId == null) {
             return;
         }
-        if (context.isCancelled()) {
-            manager.cancelSession(sessionId);
-            // 取消会立刻结束结果 future，但子任务线程可能还在写终态消息，等它安静后再继续收尾
-            manager.awaitQuiet(sessionId, finishWaitSeconds);
-        } else {
-            manager.awaitSession(sessionId, finishWaitSeconds);
-        }
+        // 主循环已结束，本轮结果已定：存活子 Agent 一律先封闭再取消。
+        // 若放任它们继续跑，它们写的文件会落在本轮变更记录之后，永远进不了影子仓库，
+        // 撤回时也就无从恢复；消息同样会越过 TRACE_END。
+        manager.cancelSession(sessionId);
+        manager.awaitQuiet(sessionId, finishWaitSeconds);
         List<Map<String, Object>> children = manager.children(sessionId);
         if (!children.isEmpty()) {
             context.put(TraceStopManager.CHILDREN, children);

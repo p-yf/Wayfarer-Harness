@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -75,6 +76,24 @@ class ChangeRecorderTest {
         List<ChangeFile> files = repository().files(latest.commitId());
         assertEquals(1, files.size(), "只应记录运行期间产生的改动");
         assertEquals("a.txt", files.get(0).path());
+    }
+
+    @Test
+    void 运行前已脏的文件被撤回后保留用户改动() {
+        // 用户在运行前就改过 seed.txt
+        write("seed.txt", "user-edit");
+        AgentContext context = context();
+        ChangeRecorder.Run run = recorder.begin(context);
+        // Agent 又把同一个文件覆盖了一遍
+        write("seed.txt", "agent-edit");
+        recorder.finish(context, run);
+
+        ChangeService service = new ChangeService(store);
+        assertEquals(1, service.list("session-1", "trace-1", 10).size(), "运行前快照不应出现在变更列表");
+
+        service.revertSessionChanges("session-1", Set.of(), "trace-1");
+
+        assertEquals("user-edit", read("seed.txt"), "撤回应回到运行前的用户内容，而不是上一次提交");
     }
 
     @Test
@@ -149,6 +168,14 @@ class ChangeRecorderTest {
         context.put(AgentContext.SESSION_ID, "session-1");
         context.put(AgentContext.TRACE_ID, "trace-1");
         return context;
+    }
+
+    private String read(String path) {
+        try {
+            return Files.readString(workspace.resolve(path), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private void write(String path, String content) {

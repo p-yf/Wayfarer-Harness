@@ -31,6 +31,11 @@ public final class SubAgent extends Loop {
 
     private static final Logger log = LoggerFactory.getLogger(SubAgent.class);
 
+    /**
+     * 取消后等待循环线程退出的上限。
+     */
+    private static final long STOP_WAIT_SECONDS = 10;
+
     private final AgentContext context;
     private final String agentId;
     private final String viaToolCallId;
@@ -71,11 +76,16 @@ public final class SubAgent extends Loop {
             Thread.currentThread().interrupt();
             finished = false;
         }
+        if (!finished) {
+            cancel();
+        }
+        // 结束/取消信号发出不等于循环线程已退出，它可能还在收尾当前工具；
+        // 等它真正停下再写终态，父级收尾时才能把这段期间的写文件一并记录
+        awaitStopped(STOP_WAIT_SECONDS);
 
         long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
         SubAgentResult result;
         if (!finished) {
-            cancel();
             result = context.isCancelled()
                     ? SubAgentResult.cancelled(agentId, elapsed)
                     : SubAgentResult.timeout(agentId, elapsed);

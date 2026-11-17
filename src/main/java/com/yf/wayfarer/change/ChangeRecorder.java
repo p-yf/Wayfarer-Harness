@@ -31,6 +31,15 @@ public final class ChangeRecorder {
      */
     static final String RUN_TOOL = "run";
 
+    /**
+     * 运行开始前的脏文件快照。
+     *
+     * <p>用户自己改过的文件必须先落成提交，否则它一直处于「运行前就脏」的状态，
+     * 永远进不了本轮记录，撤回也就无从恢复。快照只作为本轮提交的基线，
+     * 不参与页面展示，也不参与撤回。</p>
+     */
+    static final String SNAPSHOT_TOOL = "snapshot";
+
     private final ShadowRepositoryStore store;
 
     /**
@@ -63,11 +72,38 @@ public final class ChangeRecorder {
                 return null;
             }
             repository.ensure();
+            snapshot(repository, context);
+            // 快照已把运行前的改动落成提交，这里重新取一次脏集合：
+            // 正常情况下为空；个别文件暂存失败时会留在集合里，仍按旧规则排除，不影响记录
             return new Run(repository, repository.dirtyPaths());
         } catch (RuntimeException e) {
             // 记录失败不能影响运行本身，工具照常执行
             log.warn("变更记录准备失败 traceId={}", context.traceId(), e);
             return null;
+        }
+    }
+
+    /**
+     * 把运行开始前工作区的脏文件提交成一条快照，作为本轮的基线。
+     *
+     * <p>没有脏文件时不产生提交。本轮提交的父提交就是这条快照，所以「写回父提交内容」
+     * 永远等于「回到本轮开始前的磁盘状态」：即使 Agent 改的是用户运行前就改过的文件，
+     * 撤回也只会撤掉 Agent 那部分，用户的改动不会被带到父提交里一起抹掉。</p>
+     */
+    private void snapshot(ShadowRepository repository, AgentContext context) {
+        Set<String> dirty = repository.dirtyPaths();
+        if (dirty.isEmpty()) {
+            return;
+        }
+        Map<String, String> trailers = new LinkedHashMap<>();
+        trailers.put(ShadowRepository.TRAILER_SESSION, nullSafe(context.sessionId()));
+        trailers.put(ShadowRepository.TRAILER_TRACE, nullSafe(context.traceId()));
+        trailers.put(ShadowRepository.TRAILER_TOOL, SNAPSHOT_TOOL);
+        trailers.put(ShadowRepository.TRAILER_STATUS, "snapshot");
+        String commitId = repository.commit(dirty, "snapshot " + dirty.size() + " 个文件", trailers);
+        if (commitId != null) {
+            log.info("记录运行前快照 traceId={} 文件数={} commit={}",
+                    context.traceId(), dirty.size(), commitId);
         }
     }
 

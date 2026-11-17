@@ -301,7 +301,7 @@
       '<div class="s-time">' + esc(fmtTime(meta.createdAt)) +
       (running ? '<span class="s-running" title="正在运行"></span>' : "") +
       '</div>' +
-      '<button class="s-copy" title="复制会话"><svg viewBox="0 0 16 16" width="13" height="13"><rect x="5.2" y="5.2" width="7.6" height="7.6" rx="1.6" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M10.4 3.2H4.6a1.6 1.6 0 0 0-1.6 1.6v5.8" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round"/></svg></button>' +
+      '<button class="s-copy" title="复制会话（只复制对话，不新建 worktree，与原会话共用同一工作区，不建议同时运行）"><svg viewBox="0 0 16 16" width="13" height="13"><rect x="5.2" y="5.2" width="7.6" height="7.6" rx="1.6" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M10.4 3.2H4.6a1.6 1.6 0 0 0-1.6 1.6v5.8" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round"/></svg></button>' +
       '<button class="s-del" title="删除会话"><svg viewBox="0 0 16 16" width="13" height="13"><path d="M3 4h10M6.5 4V2.8h3V4M4.5 4l.6 9h5.8l.6-9M6.8 6.5v4M9.2 6.5v4" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round"/></svg></button>';
     item.addEventListener("click", () => openSession(meta.id));
     item.querySelector(".s-copy").addEventListener("click", async (e) => {
@@ -314,7 +314,7 @@
         const result = await Api.cloneSession(meta.id);
         await loadSessions();
         await openSession(result.sessionId);
-        toast("已复制为新会话");
+        toast("已复制为新会话（与原会话共用工作区，请勿同时运行）");
       } catch (err) {
         toast(err.message, true);
       }
@@ -644,7 +644,7 @@
         const result = await Api.forkSession(state.currentId, block.traceId);
         await loadSessions();
         await openSession(result.sessionId);
-        toast("已从该轮分支出新会话");
+        toast("已从该轮分支出新会话（与原会话共用工作区，请勿同时运行）");
       } catch (e) {
         toast(e.message, true);
       }
@@ -906,7 +906,7 @@
         '<div class="msg-head"><img class="avatar" src="/favicon.svg" alt="">Wayfarer' +
         (block.traceId
           ? '<div class="msg-actions">' +
-            '<button type="button" data-act="fork" title="从此分支：保留到这一轮为止的消息，另开一个会话" aria-label="从此分支">' + forkIcon + "</button>" +
+            '<button type="button" data-act="fork" title="从此分支：保留到这一轮为止的消息，另开一个会话（不新建 worktree，与原会话共用工作区，不建议同时运行）" aria-label="从此分支">' + forkIcon + "</button>" +
             '<button type="button" data-act="reset" title="回退本轮：删除这一轮及之后的全部消息" aria-label="回退本轮">' + resetIcon + "</button>" +
             "</div>"
           : "") +

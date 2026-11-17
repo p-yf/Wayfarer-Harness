@@ -147,6 +147,27 @@ class ShadowRepositoryTest {
     }
 
     @Test
+    void 撤销时按提交记录删除本轮新建目录() throws IOException {
+        Files.createDirectories(workspace.resolve("src"));
+        write("src/old.txt", "old");
+        String existing = commit(Set.of("src/old.txt"), "session-1", "trace-1", "write");
+
+        Files.createDirectories(workspace.resolve("snake/backend"));
+        write("snake/backend/pom.xml", "pom");
+        String created = commit(Set.of("snake/backend/pom.xml"), "session-1", "trace-2", "write");
+        // 没进过提交的残留，目录判定只看记录，不依赖它是否为空
+        write("snake/backend/late.txt", "late");
+
+        RevertOutcome outcome = repository.revert(List.of(created), null, "revert snake",
+                trailers("session-1", "trace-2", "session-reset"));
+
+        assertNotNull(outcome.commitId());
+        assertFalse(Files.exists(workspace.resolve("snake")), "本轮新建的目录应整棵删除，含未提交残留");
+        assertTrue(Files.isRegularFile(workspace.resolve("src/old.txt")), "原有目录不受影响");
+        assertNotNull(existing);
+    }
+
+    @Test
     void 文件之后被手工改过时以撤销内容覆盖() {
         write("a.txt", "v2");
         String commitId = commit(Set.of("a.txt"), "session-1", "trace-1", "write");

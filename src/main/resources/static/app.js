@@ -8,7 +8,7 @@
   const emptyStateEl = $("emptyState");
   const esc = window.Markdown.escapeHtml;
   const AGENT_STORAGE_KEY = "wayfarer.agent";
-  const AGENT_NAMES = ["wayfarer", "wayfarerpro"];
+  const AGENT_NAMES = ["wayfarer", "wayfarerpro", "wayfarer-rsi"];
 
   const state = {
     // 当前 agent 名称：后端按名称装配不同工具集，默认 wayfarer
@@ -35,6 +35,9 @@
     skillEntries: [],
     skillFile: null,
     skillCreating: null,
+    // RSI 沉淀仓库视图（rsiSkill / rsiMemory 共用一份状态，切换 kind 时重建）
+    rsi: null,
+    rsiAgents: null,
     editing: null,
     workspace: "",
     pendingWorkspace: "",
@@ -468,13 +471,15 @@
 
   function renderAgent() {
     $("agentName").textContent = state.agent;
-    $("agentBtn").classList.toggle("set", state.agent === "wayfarerpro");
+    $("agentBtn").classList.toggle("set", state.agent !== "wayfarer");
     for (const option of $("agentMenu").querySelectorAll(".perm-option")) {
       option.classList.toggle("active", option.dataset.agent === state.agent);
     }
-    $("agentBtn").title = state.agent === "wayfarerpro"
-      ? "当前 Agent：wayfarerpro（标准能力 + 子 Agent 派发）"
-      : "当前 Agent：wayfarer";
+    $("agentBtn").title = state.agent === "wayfarer-rsi"
+      ? "当前 Agent：wayfarer-rsi（标准能力 + 记忆/技能沉淀）"
+      : state.agent === "wayfarerpro"
+        ? "当前 Agent：wayfarerpro（标准能力 + 子 Agent 派发）"
+        : "当前 Agent：wayfarer";
   }
 
   function selectAgent(name) {
@@ -1459,7 +1464,23 @@
     inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + "px";
   }
 
-  const PANEL_TITLES = { settings: "设置", prompt: "系统提示词", skills: "Skills", changes: "本轮变更" };
+  const PANEL_TITLES = {
+    settings: "设置", prompt: "系统提示词", skills: "Skills", changes: "本轮变更",
+    rsiSkill: "沉淀 Skills", rsiMemory: "沉淀 Memory"
+  };
+
+  /** RSI 视图初始状态：沉淀只属于 wayfarer-rsi（"自己只沉淀自己的"），kind 由面板入口决定 */
+  function resetRsiState(kind) {
+    state.rsi = {
+      kind: kind,
+      agent: "wayfarer-rsi",
+      commits: [],
+      selected: null,
+      diff: null,
+      files: null,
+      openFile: null
+    };
+  }
 
   /**
    * 打开右侧面板。view 决定内容，payload 携带 changes 视图需要的 traceId 与条目。
@@ -1520,6 +1541,8 @@
         state.skillEntries = tree.entries || [];
       } else if (state.panel.view === "changes" && !state.panel.entries.length) {
         state.panel.entries = await Api.listChanges(state.currentId, state.panel.traceId, 200);
+      } else if (state.panel.view === "rsiSkill" || state.panel.view === "rsiMemory") {
+        await loadRsiData();
       }
       renderPanel();
     } catch (e) {
@@ -1585,7 +1608,199 @@
       renderChanges();
       return;
     }
+    if (state.panel.view === "rsiSkill" || state.panel.view === "rsiMemory") {
+      renderRsiStore();
+      return;
+    }
     renderSettings($("panelBody"));
+  }
+
+  /* ==================================================================== */
+  /* RSI 沉淀仓库视图：历史 → 单提交详情（diff2html + 文件树 + 回溯）         */
+  /* ==================================================================== */
+
+  /**
+   * 按当前 kind/agent 拉取数据：历史列表 + HEAD 文件树；选中提交时追加其 diff。
+   */
+  async function loadRsiData() {
+    const view = state.panel.view;
+    const kind = view === "rsiSkill" ? "skill" : "memory";
+    if (!state.rsi || state.rsi.kind !== kind) resetRsiState(kind);
+    const rsi = state.rsi;
+    try {
+      // agent 白名单只在首次进入时拉取（后端返回已注册蓝图清单）
+      if (!state.rsiAgents) state.rsiAgents = await Api.rsiAgents();
+      rsi.commits = await Api.rsiCommits(rsi.kind, rsi.agent);
+      rsi.files = await Api.rsiFiles(rsi.kind, rsi.agent);
+      if (rsi.selected) {
+        rsi.diff = (await Api.rsiDiff(rsi.kind, rsi.agent, { commit: rsi.selected })).diff;
+      }
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+
+  /**
+   * 主渲染：未选中提交时显示历史列表；选中后显示详情（diff + 文件 + 回溯按钮）。
+   */
+  function renderRsiStore() {
+    const body = $("panelBody");
+    if (!state.rsi || (state.panel.view === "rsiSkill") !== (state.rsi.kind === "skill")) {
+      resetRsiState(state.panel.view === "rsiSkill" ? "skill" : "memory");
+    }
+    const rsi = state.rsi;
+    const agents = state.rsiAgents && state.rsiAgents.length ? state.rsiAgents : [rsi.agent];
+
+    let html =
+      '<div class="cfg-note">沉淀仓库由 git 管理，只读查看 + 一键回溯（reset --hard）。' +
+      'kind=' + esc(rsi.kind) + " · store=stores/" + esc(rsi.agent) + "/</div>" +
+      '<div class="rsi-toolbar">' +
+      '<select id="rsiAgentSel" class="rsi-select" title="选择 agent 的沉淀仓库">' +
+      agents.map((a) => '<option value="' + esc(a) + '"' + (a === rsi.agent ? " selected" : "") + ">" + esc(a) + "</option>").join("") +
+      "</select>" +
+      '<button class="cfg-new" id="rsiRefresh">刷新</button></div>';
+
+    if (rsi.selected) {
+      const commit = rsi.commits.find((c) => c.hash === rsi.selected) || {};
+      html +=
+        '<div class="rsi-detail-head">' +
+        '<button class="btn btn-ghost" id="rsiBack">← 返回历史</button>' +
+        '<button class="btn btn-primary" id="rsiResetBtn" title="把仓库强制移动到该提交（之后的提交将不在 HEAD 历史中）">回溯到此版本</button></div>' +
+        '<div class="rsi-commit-detail">' +
+        '<div class="rsi-hash">' + esc(rsi.selected.slice(0, 10)) + "</div>" +
+        '<div class="rsi-summary">' + esc(commit.summary || "") + "</div>" +
+        '<div class="rsi-meta">' + esc(timeText(commit.time)) +
+        (commit.layer ? " · " + esc(commit.layer) : "") +
+        (commit.sourceSession ? " · session " + esc(commit.sourceSession) : "") + "</div></div>" +
+        '<div class="rsi-section-title">变更差异</div>' +
+        '<div class="change-diff" id="rsiDiffBox"></div>' +
+        '<div class="rsi-section-title">版本文件</div>' +
+        '<div id="rsiFileList"></div>';
+    } else {
+      html += rsi.commits.length
+        ? rsi.commits.map((commit) =>
+            '<div class="rsi-commit" data-hash="' + esc(commit.hash) + '">' +
+            '<div class="rsi-commit-head">' +
+            '<span class="rsi-hash">' + esc(commit.hash.slice(0, 10)) + "</span>" +
+            (commit.layer ? '<span class="rsi-layer">' + esc(commit.layer) + "</span>" : "") +
+            '<span class="rsi-time">' + esc(timeText(commit.time)) + "</span></div>" +
+            '<div class="rsi-summary">' + esc(commit.summary || "") + "</div>" +
+            (commit.sourceSession ? '<div class="rsi-meta">session ' + esc(commit.sourceSession) + "</div>" : "") +
+            "</div>").join("")
+        : '<div class="panel-empty">暂无沉淀记录（条件门未通过或尚未运行）</div>';
+    }
+    body.innerHTML = html;
+
+    $("rsiRefresh").addEventListener("click", async () => {
+      rsi.selected = null;
+      await loadRsiData();
+      renderRsiStore();
+    });
+    $("rsiAgentSel").addEventListener("change", async (e) => {
+      rsi.agent = e.target.value;
+      rsi.selected = null;
+      await loadRsiData();
+      renderRsiStore();
+    });
+
+    if (rsi.selected) {
+      // 详情视图：diff + 文件树 + 回溯
+      $("rsiBack").addEventListener("click", () => {
+        rsi.selected = null;
+        rsi.diff = null;
+        rsi.openFile = null;
+        renderRsiStore();
+      });
+      $("rsiResetBtn").addEventListener("click", async () => {
+        if (!confirm("回溯会把 " + rsi.kind + " 仓库 reset --hard 到 " + rsi.selected.slice(0, 10) +
+          "，之后的提交将从 HEAD 丢失，且不可撤销。确定？")) return;
+        try {
+          const result = await Api.rsiReset(rsi.kind, rsi.agent, rsi.selected);
+          toast("已回溯，HEAD=" + (result.head || "").slice(0, 10));
+          rsi.selected = null;
+          rsi.diff = null;
+          await loadRsiData();
+          renderRsiStore();
+        } catch (e) {
+          toast(e.message, true);
+        }
+      });
+      const diffBox = $("rsiDiffBox");
+      if (rsi.diff !== null) renderDiff(diffBox, rsi.diff);
+      else {
+        diffBox.innerHTML = '<div class="change-note">加载中…</div>';
+        loadRsiData().then(() => {
+          if (state.rsi === rsi && $("rsiDiffBox")) renderDiff($("rsiDiffBox"), rsi.diff);
+        });
+      }
+      renderRsiFiles();
+    } else {
+      // 历史视图：点击进入详情
+      body.querySelectorAll(".rsi-commit").forEach((row) => {
+        row.addEventListener("click", async () => {
+          rsi.selected = row.dataset.hash;
+          rsi.diff = null;
+          rsi.openFile = null;
+          try {
+            rsi.files = await Api.rsiFiles(rsi.kind, rsi.agent, rsi.selected);
+          } catch (e) {
+            toast(e.message, true);
+          }
+          renderRsiStore();
+        });
+      });
+    }
+  }
+
+  /**
+   * 详情视图的文件树：每行可点，展开该文件在该提交的完整内容。
+   */
+  function renderRsiFiles() {
+    const rsi = state.rsi;
+    const holder = $("rsiFileList");
+    if (!holder) return;
+    const files = (rsi.files && rsi.files.files) || [];
+    if (!files.length) {
+      holder.innerHTML = '<div class="panel-empty">该版本没有文件</div>';
+      return;
+    }
+    holder.innerHTML = files.map((file) =>
+      '<div class="rsi-file" data-path="' + esc(file) + '">' +
+      '<button type="button" class="rsi-file-row"><span class="change-file-path">' + esc(file) + "</span>" +
+      '<span class="change-bubble-arrow">' + (rsi.openFile === file ? "▾" : "▸") + "</span></button>" +
+      '<pre class="rsi-file-content hidden"></pre></div>').join("");
+
+    holder.querySelectorAll(".rsi-file").forEach((item) => {
+      const path = item.dataset.path;
+      const content = item.querySelector(".rsi-file-content");
+      const arrow = item.querySelector(".change-bubble-arrow");
+      item.querySelector(".rsi-file-row").addEventListener("click", async () => {
+        if (!content.classList.contains("hidden")) {
+          content.classList.add("hidden");
+          content.textContent = "";
+          arrow.textContent = "▸";
+          rsi.openFile = null;
+          return;
+        }
+        content.classList.remove("hidden");
+        content.textContent = "加载中…";
+        arrow.textContent = "▾";
+        rsi.openFile = path;
+        try {
+          const data = await Api.rsiFile(rsi.kind, rsi.agent, path, rsi.selected);
+          content.textContent = data.content || "（空文件）";
+        } catch (e) {
+          content.textContent = "读取失败：" + e.message;
+        }
+      });
+    });
+  }
+
+  /** ISO 时间戳压短为本地可读形式 */
+  function timeText(iso) {
+    if (!iso) return "";
+    const date = new Date(iso);
+    return isNaN(date.getTime()) ? iso : date.toLocaleString();
   }
 
   /**
@@ -2435,6 +2650,9 @@
   $("newChatBtn").addEventListener("click", createSession);
   $("promptNavBtn").addEventListener("click", () => openPanel("prompt"));
   $("skillsNavBtn").addEventListener("click", () => openPanel("skills"));
+  // RSI 沉淀仓库双入口：kind 由入口决定（skill / memory 两个 git 仓库）
+  $("rsiSkillNavBtn").addEventListener("click", () => openPanel("rsiSkill"));
+  $("rsiMemoryNavBtn").addEventListener("click", () => openPanel("rsiMemory"));
   $("workspaceBtn").addEventListener("click", openWorkspacePicker);
   $("agentBtn").addEventListener("click", (e) => {
     e.stopPropagation();

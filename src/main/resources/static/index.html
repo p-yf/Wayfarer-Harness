@@ -27,6 +27,14 @@
           <svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/></svg>
           Skills
         </button>
+        <button class="nav-btn" id="rsiSkillNavBtn" title="沉淀技能仓库（git 历史 / diff / 回溯）">
+          <svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/><path d="M8 5.2v3.2M8 10.6v.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          沉淀 Skills
+        </button>
+        <button class="nav-btn" id="rsiMemoryNavBtn" title="沉淀记忆仓库（git 历史 / diff / 回溯）">
+          <svg viewBox="0 0 16 16" width="14" height="14"><path d="M2.5 3.5a1 1 0 0 1 1-1h3.4L8.2 4h4.3a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/><path d="M8 6.4v3.6M6.2 8.2h3.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+          沉淀 Memory
+        </button>
       </div>
       <div class="session-list" id="sessionList"></div>
       <div class="sidebar-foot">
@@ -81,6 +89,7 @@
               <div class="perm-tip">选择 Agent</div>
               <button class="perm-option" data-agent="wayfarer">wayfarer<small>标准能力</small></button>
               <button class="perm-option" data-agent="wayfarerpro">wayfarerpro<small>标准能力 + 子 Agent 派发</small></button>
+              <button class="perm-option" data-agent="wayfarer-rsi">wayfarer-rsi<small>标准能力 + 记忆/技能沉淀</small></button>
             </div>
             <button class="ws-btn" id="workspaceBtn" title="选择工作区">
               <svg viewBox="0 0 16 16" width="14" height="14"><path d="M1.8 4.2a1 1 0 0 1 1-1h3l1.3 1.4h5.1a1 1 0 0 1 1 1v6.2a1 1 0 0 1-1 1H2.8a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>

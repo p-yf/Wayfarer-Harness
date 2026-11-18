@@ -41,6 +41,41 @@ wayfarer:
   # 人工确认：等待工具确认的最长秒数，超时按未批准处理
   hitl:
     timeout-seconds: 300
+  # RSI 自动沉淀：四层记忆 + skill 沉淀，jgit 逐次提交可回溯；阈值均有代码内缺省值
+  rsi:
+    # 总开关：关闭后沉淀与召回全部跳过，普通 agent 行为不受影响
+    enabled: true
+    # 存储根目录：其下 stores/（沉淀产物）、git/（仓库）、state/（游标，不入 git）
+    root: ./.wayfarer/rsi
+    # 沉淀线程池：有界队列，满了丢弃并 warn（宁缺毋滥）
+    pool-size: 2
+    queue-capacity: 32
+    # L1 打分门槛：score 低于该值的原子记忆直接丢弃
+    l1-score-floor: 6
+    # L1 暖启动阈值：初始值，每触发一次翻倍、至 l1-threshold-max 封顶
+    l1-threshold-start: 1
+    l1-threshold-max: 16
+    # L1 idle 兜底：缓冲非空且超该秒数无活动即强制触发一轮
+    l1-idle-seconds: 60
+    # L1 提取窗口：单轮处理的新消息条数 + 背景消息条数 + 单次落盘上限
+    l1-batch-process: 10
+    l1-max-background: 5
+    l1-max-memories: 10
+    # 两阶段判重：每条新记忆词面召回的既有 L1 条数
+    conflict-recall-top-k: 5
+    # L2 延迟：L1 落盘成功后延迟该秒数再跑场景整理 agent
+    l2-delay-seconds: 30
+    # 场景库上限：达到后禁止 CREATE（分档预警 + 工具硬约束双保险）
+    max-scenes: 20
+    # L3 P4 阈值：自上次画像以来新增记忆达到该条数触发例行蒸馏
+    persona-trigger-every-n: 20
+    # skill 萃取：累计这么多最终回复轮才触发一次
+    skill-archive-every-n-rounds: 5
+    # 记忆召回：L1 top-k 条数与注入总预算（约等于 token 数）
+    recall-top-k: 5
+    recall-token-budget: 800
+    # skill 软上限：达到后 Review prompt 收紧为优先 patch 合并
+    skill-soft-limit: 20
   # 文件变更记录：影子 git 仓库按工作区建立，git-dir 放在工作区之外，不会生成 .git
   changes:
     enabled: true

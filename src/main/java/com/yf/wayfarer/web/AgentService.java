@@ -81,6 +81,7 @@ public class AgentService {
                         ChangeRecorder changeRecorder,
                         TraceStatus traceStatus,
                         SubAgentManager subAgentManager,
+                        AgentCatalog agentCatalog,
                         @Value("${wayfarer.root-workspace:./}") String rootWorkspace,
                         @Value("${wayfarer.model.api-key:}") String apiKey,
                         @Value("${wayfarer.model.base-url:https://api.deepseek.com}") String baseUrl,
@@ -102,7 +103,8 @@ public class AgentService {
         this.changeRecorder = changeRecorder;
         this.traceStatus = traceStatus;
         this.subAgentManager = subAgentManager;
-        this.agentCatalog = new AgentCatalog(List.of(new WayfarerBlueprint(), new WayfarerProBlueprint()));
+        // 蓝图目录改为共享 bean：RsiController 的 agent 白名单与这里保持同一份注册表
+        this.agentCatalog = agentCatalog;
         this.rootWorkspace = Path.of(rootWorkspace).toAbsolutePath().normalize().toString();
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;

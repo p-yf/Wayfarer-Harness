@@ -26,6 +26,19 @@ public final class LoopChain {
         return new LoopChain(sorted);
     }
 
+    /**
+     * 在现有链上追加处理器，返回重新按 sort 排序的新链（原链不可变、不受影响）。
+     *
+     * <p>供子类蓝图在 super 装配结果上插入自己的 handler（如 RsiBlueprint 在标准模型链上
+     * 插入记忆召回、在标准运行链上追加沉淀入口），避免整条链的手工复制。</p>
+     */
+    public LoopChain then(ChainHandler... extra) {
+        List<ChainHandler> merged = new ArrayList<>(handlers);
+        merged.addAll(List.of(extra));
+        merged.sort(Comparator.comparingInt(ChainHandler::sort));
+        return new LoopChain(merged);
+    }
+
     public void run(AgentContext context) {
         run(context, () -> {
         });

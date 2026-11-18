@@ -136,6 +136,27 @@
       if (traceId) query.push("traceId=" + encodeURIComponent(traceId));
       return request("GET", "/api/changes/file-diff?" + query.join("&"));
     },
+    // RSI 沉淀仓库：kind ∈ skill|memory，agent 为沉淀主体（stores/<agent>/ 子树）
+    rsiAgents: () => request("GET", "/api/rsi/agents"),
+    rsiCommits: (kind, agent) =>
+      request("GET", "/api/rsi/" + kind + "/commits?agent=" + encodeURIComponent(agent)),
+    // 单提交 diff：{ commit }；任意两点：{ from, to }
+    rsiDiff: (kind, agent, params) => {
+      const query = ["agent=" + encodeURIComponent(agent)];
+      if (params.commit) query.push("commit=" + encodeURIComponent(params.commit));
+      if (params.from) query.push("from=" + encodeURIComponent(params.from));
+      if (params.to) query.push("to=" + encodeURIComponent(params.to));
+      return request("GET", "/api/rsi/" + kind + "/diff?" + query.join("&"));
+    },
+    rsiFiles: (kind, agent, commit) =>
+      request("GET", "/api/rsi/" + kind + "/files?agent=" + encodeURIComponent(agent) +
+        (commit ? "&commit=" + encodeURIComponent(commit) : "")),
+    rsiFile: (kind, agent, path, commit) =>
+      request("GET", "/api/rsi/" + kind + "/file?agent=" + encodeURIComponent(agent) +
+        "&path=" + encodeURIComponent(path) + (commit ? "&commit=" + encodeURIComponent(commit) : "")),
+    rsiReset: (kind, agent, commit) =>
+      request("POST", "/api/rsi/" + kind + "/reset?agent=" + encodeURIComponent(agent) +
+        "&commit=" + encodeURIComponent(commit)),
     streamAgent: streamAgent
   };
 })();

@@ -1328,3 +1328,138 @@ body.is-resizing .sidebar, body.is-resizing .panel { transition: none; }
   border-top: 1px solid var(--border-soft);
 }
 .ws-foot .btn:disabled { opacity: 0.45; cursor: default; }
+
+/* ==================================================================== */
+/* RSI 沉淀仓库面板：历史列表 / 单提交详情 / diff / 文件树 / 回溯           */
+/* ==================================================================== */
+
+.rsi-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.rsi-select {
+  flex: 1;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.rsi-commit,
+.rsi-commit-detail {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: var(--bg);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.rsi-commit:hover {
+  border-color: var(--ds-400);
+  background: var(--bg-hover);
+}
+
+.rsi-commit-detail {
+  cursor: default;
+}
+
+.rsi-commit-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rsi-hash {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--ds-500);
+}
+
+.rsi-layer {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--ds-50);
+  color: var(--ds-600);
+}
+
+.rsi-time {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-tertiary, var(--nb-500));
+}
+
+.rsi-summary {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.rsi-meta {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-tertiary, var(--nb-500));
+  word-break: break-all;
+}
+
+.rsi-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.rsi-section-title {
+  margin: 14px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.rsi-file {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.rsi-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.rsi-file-row:hover {
+  background: var(--bg-hover);
+}
+
+.rsi-file-content {
+  margin: 0;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-soft);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow: auto;
+  max-height: 360px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
